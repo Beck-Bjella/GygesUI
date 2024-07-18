@@ -74,6 +74,7 @@ impl UgiEngine {
 
     pub fn send(&mut self, cmd: &str) {
         self.input_sender.send(cmd.to_string()).expect("Failed to send data to the engine");
+        println!("Sent: {}", cmd);
 
     }
 
@@ -81,6 +82,7 @@ impl UgiEngine {
         match self.ouput_reciver.try_recv() {
             Ok(s) => {
                 self.recived_queue.push_front(s.clone());
+                println!("Recived: {}", s);
 
             }
             Err(_) => {}

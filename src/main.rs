@@ -380,12 +380,8 @@ impl DrawableBoard {
     }
 
     pub fn render_move(&mut self, mv: Move, color: Color) {
-        for i in 0..mv.len() - 2 {
-            if i % 2 == 0 {
-                continue;
-
-            }
-            self.render_arrow(mv[i], mv[i+2], color);
+        for i in 0..mv.len() -1 {
+            self.render_arrow(mv[i], mv[i+1], color);
 
         }
 
@@ -523,10 +519,10 @@ impl DrawableBoard {
 
 }
 
-pub fn start_new_seach(engine: &mut UgiEngine, enginge_side: f64, drawable_board: &mut DrawableBoard) {
+pub fn start_new_seach(engine: &mut UgiEngine, engine_side: f64, drawable_board: &mut DrawableBoard) {
     engine.send("stop");
 
-    let setcmd = if enginge_side == 1.0 {
+    let setcmd = if engine_side == 1.0 {
         format!("setpos data {}", drawable_board.boardstate_str())
     } else {
         format!("setpos data {}", drawable_board.flipped_boardstate_str())
@@ -569,7 +565,6 @@ pub fn parse_info_str(info_str: &str, engine_side: f64) -> SearchInfo {
                 "bestmove" => {
                     let best_move = if engine_side == 1.0 {
                         parse_bestmove_str(group[1])
-                       
 
                     } else {
                         flip_move(parse_bestmove_str(group[1]))
@@ -626,12 +621,6 @@ pub fn parse_info_str(info_str: &str, engine_side: f64) -> SearchInfo {
 pub fn flip_move(mv: Move) -> Move {
     let mut flipped_mv = vec![];
     for i in 0..mv.len() {
-        if i % 2 == 0 {
-            flipped_mv.push(mv[i]);
-            continue;
-
-        }
-
         if mv[i] == 37 {
             flipped_mv.push(36);
             continue;
@@ -709,7 +698,7 @@ async fn main() {
 
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    // start_new_seach(&mut engine, engine_side, &mut drawable_board);
+    start_new_seach(&mut engine, engine_side, &mut drawable_board);
 
     let mut prev_boardstate = drawable_board.boardstate_str();
     loop {
@@ -824,13 +813,14 @@ async fn main() {
 
         //     });
 
-
-
         let current_boardstate = drawable_board.boardstate_str();
         if current_boardstate != prev_boardstate && drawable_board.state == State::None {
             prev_boardstate = current_boardstate.clone();
 
-            // start_new_seach(&mut engine, engine_side, &mut drawable_board);
+            start_new_seach(&mut engine, engine_side, &mut drawable_board);
+
+            println!("STring: {}", drawable_board.boardstate_str());
+            println!("Flipped: {}", drawable_board.flipped_boardstate_str());
 
         }
 
