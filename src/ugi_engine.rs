@@ -5,6 +5,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::collections::VecDeque;
 
 pub struct UgiEngine {
+    pub enabled: bool,
+    pub side: f64,
+    
     input_sender: Sender<String>,
     ouput_reciver: Receiver<String>,
 
@@ -46,6 +49,9 @@ impl UgiEngine {
         });
 
         return UgiEngine {
+            enabled: true,
+            side: 1.0,
+
             input_sender,
             ouput_reciver,
 
@@ -74,7 +80,6 @@ impl UgiEngine {
 
     pub fn send(&mut self, cmd: &str) {
         self.input_sender.send(cmd.to_string()).expect("Failed to send data to the engine");
-        println!("Sent: {}", cmd);
 
     }
 
@@ -82,7 +87,6 @@ impl UgiEngine {
         match self.ouput_reciver.try_recv() {
             Ok(s) => {
                 self.recived_queue.push_front(s.clone());
-                println!("Recived: {}", s);
 
             }
             Err(_) => {}

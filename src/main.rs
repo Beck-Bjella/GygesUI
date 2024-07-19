@@ -1,10 +1,15 @@
 mod ugi_engine;
 
+use std::hash;
+
+use camera::mouse;
 use macroquad::prelude::*;
 use macroquad::ui::{self, widgets, hash};
 
 use ugi_engine::UgiEngine;
 
+
+// Constants
 pub const STARTING_BOARD: BoardState = [
     3, 2, 1 ,1, 2, 3,
     0 ,0 ,0, 0, 0, 0,
@@ -15,23 +20,28 @@ pub const STARTING_BOARD: BoardState = [
     0, 0
 ];
 
-fn window_conf() -> Conf {
-    Conf {
-        window_title: "gyges ui".to_owned(),
-        window_height: 900,
-        window_width: 1250,
-        window_resizable: false,
-        ..Default::default() 
-    }
+pub const BOARD_WIDTH: f32 = 900.0;
+pub const BOARD_HEIGHT: f32 = 900.0;
+pub const BOARD_RADIUS: f32 = 450.0;
 
-}
+pub const GRID_WIDTH: f32 = 75.0;
+pub const GRID_HEIGHT: f32 = 75.0;
+
+pub const PIECE_RADIUS: f32 = 30.0;
+
+pub const COLOR_BOARD: Color = Color::new(160.0/255.0, 149.0/255.0, 115.0/255.0 , 1.0); // Hex: #a09573
+pub const COLOR_GRIDSPOT: Color = Color::new(175.0/255.0, 163.0/255.0, 126.0/255.0, 1.0); // Hex: #afa37e
+pub const COLOR_MOVE: Color = Color::new(0.0, 1.0, 0.0, 1.0); // Lime Green
+
+pub type Move = Vec<usize>;
+pub type BoardState = [usize; 38];
+
 
 #[derive(Clone)]
 pub struct Piece {
     pub id: usize,
     pub pos: (f32, f32),
     pub i : usize,
-    pub radus: f32,
     pub piece_type: usize,
 
 }
@@ -42,7 +52,6 @@ impl Piece {
             id,
             pos,
             i,
-            radus: 30.0,
             piece_type,
     
         };
@@ -54,19 +63,28 @@ impl Piece {
         let dy = self.pos.1 - point_y;
         let dist = (dx * dx + dy * dy) as f32;
 
-        return dist < self.radus * self.radus;
+        return dist < (PIECE_RADIUS * PIECE_RADIUS);
 
     }
 
     pub fn draw(&self) {
         if self.piece_type == 3 {
-            draw_three_piece(self.pos.0, self.pos.1);
+            draw_poly(self.pos.0, self.pos.1, 100, PIECE_RADIUS, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 25.0, 0., COLOR_BOARD);
+            draw_poly(self.pos.0, self.pos.1, 100, 20.0, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 15.0, 0., COLOR_BOARD);
+            draw_poly(self.pos.0, self.pos.1, 100, 10.0, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 5.0, 0., COLOR_BOARD);
 
         } else if self.piece_type == 2 {
-            draw_two_piece(self.pos.0, self.pos.1);
+            draw_poly(self.pos.0, self.pos.1, 100, PIECE_RADIUS, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 25.0, 0., COLOR_BOARD);
+            draw_poly(self.pos.0, self.pos.1, 100, 20.0, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 15.0, 0., COLOR_BOARD);
 
         } else if self.piece_type == 1 {
-            draw_one_piece(self.pos.0, self.pos.1);
+            draw_poly(self.pos.0, self.pos.1, 100, PIECE_RADIUS, 0., BLACK);
+            draw_poly(self.pos.0, self.pos.1, 100, 25.0, 0., COLOR_BOARD);
 
         }
 
@@ -74,46 +92,15 @@ impl Piece {
 
 }
 
-pub fn draw_three_piece(x: f32, y: f32) {
-    draw_poly(x, y, 100, 30.0, 0., BLACK);
-    draw_poly(x, y, 100, 25.0, 0., COLOR_BOARD);
-    draw_poly(x, y, 100, 20.0, 0., BLACK);
-    draw_poly(x, y, 100, 15.0, 0., COLOR_BOARD);
-    draw_poly(x, y, 100, 10.0, 0., BLACK);
-    draw_poly(x, y, 100, 5.0, 0., COLOR_BOARD);
-
-}
-
-pub fn draw_two_piece(x: f32, y: f32) {
-    draw_poly(x, y, 100, 30.0, 0., BLACK);
-    draw_poly(x, y, 100, 25.0, 0., COLOR_BOARD);
-    draw_poly(x, y, 100, 20.0, 0., BLACK);
-    draw_poly(x, y, 100, 15.0, 0., COLOR_BOARD);
-
-}
-
-pub fn draw_one_piece(x: f32, y: f32) {
-    draw_poly(x, y, 100, 30.0, 0., BLACK);
-    draw_poly(x, y, 100, 25.0, 0., COLOR_BOARD);
-
-}
-
-pub type BoardState = [usize; 38];
 
 #[derive(Debug, PartialEq)]
-pub enum State {
+pub enum Action {
     None,
     Dragging(usize),
     Dropping(usize)
 
 }
 
-pub const BOARD_WIDTH: f32 = 900.0;
-pub const BOARD_HEIGHT: f32 = 900.0;
-pub const BOARD_RADIUS: f32 = 450.0;
-
-pub const GRID_WIDTH: f32 = 75.0;
-pub const GRID_HEIGHT: f32 = 75.0;
 
 pub struct DrawableBoard {
     boardstate: BoardState,
@@ -124,11 +111,7 @@ pub struct DrawableBoard {
     pos: (f32, f32),
     board_pos: (f32, f32),
 
-    state: State,
-
-    pub histroy: Vec<BoardState>,
-    pub viewing_history: bool,
-    pub history_idx: usize,
+    action: Action,
 
 }
 
@@ -145,11 +128,7 @@ impl DrawableBoard {
             pos: (x, y),
             board_pos,
             
-            state: State::None,
-
-            histroy: vec![boardstate.clone()],
-            viewing_history: false,
-            history_idx: 0,
+            action: Action::None,
 
         };
 
@@ -301,26 +280,22 @@ impl DrawableBoard {
 
     }
     
-    pub fn update(&mut self) {
-        match self.state {
-            State::None => {
+    /// Returns true if the boardstate changed this frame
+    pub fn update(&mut self) -> bool{
+        let mouse_pos = mouse_position();
+
+        match self.action {
+            Action::None => {
+                let mut state_change = false;
                 if self.prev_boardstate != Some(self.boardstate) {
                     self.prev_boardstate = Some(self.boardstate.clone());
-                    
-                    if self.viewing_history {
-                        self.viewing_history = false;
-                        self.histroy = self.histroy[0..self.history_idx + 1].to_vec();
 
-                    }
-                    self.histroy.push(self.boardstate.clone());
-                    
+                    state_change = true;
                    
                 }
-
-                let mouse_pos = mouse_position();
                 for piece in self.pieces.iter() {
                     if piece.is_touching_point(mouse_pos.0, mouse_pos.1) && is_mouse_button_pressed(MouseButton::Left) {
-                        self.state = State::Dragging(piece.id);
+                        self.action = Action::Dragging(piece.id);
                         self.boardstate[piece.i] = 0;
                         break;
 
@@ -328,20 +303,20 @@ impl DrawableBoard {
 
                 }
 
-            },
-            State::Dragging(id) => {
-                let mouse_pos = mouse_position();
+                return state_change;
 
+            },
+            Action::Dragging(id) => {
                 if is_mouse_button_released(MouseButton::Left) {
                     if let (Some(snap_pos), replace) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, false) {
                         if replace {
                             if let Some(piece) = self.get_piece_at(snap_pos) {
-                                self.state = State::Dropping(piece.id);
+                                self.action = Action::Dropping(piece.id);
 
                             }
                             
                         } else {
-                            self.state = State::None;
+                            self.action = Action::None;
 
                         }
 
@@ -356,43 +331,28 @@ impl DrawableBoard {
 
                 }
 
-            }
-            State::Dropping(id) => {
-                let mouse_pos = mouse_position();
+                return false;
 
+            }
+            Action::Dropping(id) => {
                 if is_mouse_button_pressed(MouseButton::Left) {
                     if let (Some(snap_pos), _) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, true) {
                         self.snap_piece(id, snap_pos);
 
                     }
 
-                    self.state = State::None;
+                    self.action = Action::None;
 
                 } else {
                     self.moving(id);
 
                 }
+
+                return false;
                 
             }
 
         }
-
-    }
-
-    pub fn render_move(&mut self, mv: Move, color: Color) {
-        for i in 0..mv.len() -1 {
-            self.render_arrow(mv[i], mv[i+1], color);
-
-        }
-
-    }
-
-    fn render_arrow(&mut self, boardpos_1: usize, boardpos_2: usize, color: Color) {
-        let xy_pos_1 = self.get_pos(boardpos_1);
-        let xy_pos_2 = self.get_pos(boardpos_2);
-
-        draw_line(xy_pos_1.0, xy_pos_1.1, xy_pos_2.0, xy_pos_2.1, 2.5, color);
-        draw_circle(xy_pos_2.0, xy_pos_2.1, 5.0, color)
 
     }
 
@@ -421,60 +381,59 @@ impl DrawableBoard {
         draw_circle(self.get_pos(36).0, self.get_pos(36).1, 30.0, COLOR_GRIDSPOT);
         draw_circle(self.get_pos(37).0, self.get_pos(37).1, 30.0, COLOR_GRIDSPOT);
 
-         // Pieces
+        // Pieces
         for piece in self.pieces.iter() {
             piece.draw();
 
         }
 
+        // Draw box around whole board
+        draw_rectangle_lines(self.pos.0, self.pos.1, BOARD_WIDTH, BOARD_HEIGHT, 2.0, BLACK);
+
+        // // Draw a box around where the piece will be placed
+        // if self.state != State::None {
+        //     let mouse_pos = mouse_position();
+        //     let (snap_pos, _) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, false);
+        //     if let Some(snap_pos) = snap_pos {
+        //         let pos = self.get_pos(snap_pos);
+        //         draw_rectangle_lines(pos.0 - 37.5, pos.1 - 37.5, 75.0, 75.0, 2.0, BLACK);
+
+        //     }
+
+        // }
+
+    }
+
+    pub fn render_move(&mut self, mv: Move, color: Color) {
+        for i in 0..mv.len() -1 {
+            self.render_arrow(mv[i], mv[i+1], color);
+
+        }
+
+    }
+
+    fn render_arrow(&mut self, boardpos_1: usize, boardpos_2: usize, color: Color) {
+        let xy_pos_1 = self.get_pos(boardpos_1);
+        let xy_pos_2 = self.get_pos(boardpos_2);
+
+        draw_line(xy_pos_1.0, xy_pos_1.1, xy_pos_2.0, xy_pos_2.1, 2.5, color);
+        draw_circle(xy_pos_2.0, xy_pos_2.1, 5.0, color)
+
     }
 
     pub fn reset(&mut self) {
-        let new = DrawableBoard::new(self.pos.0, self.pos.1, [
-            3, 2, 1 ,1, 2, 3,
-            0 ,0 ,0, 0, 0, 0,
-            0 ,0 ,0, 0, 0, 0,
-            0 ,0 ,0 ,0, 0, 0,
-            0 ,0, 0, 0, 0, 0,
-            3 ,2 ,1 ,1, 2, 3,
-            0, 0,
-        ]);
+        let new = DrawableBoard::new(self.pos.0, self.pos.1, STARTING_BOARD);
         
         self.boardstate = new.boardstate;
+        self.prev_boardstate = None;
 
         self.pieces = new.pieces;
 
         self.pos = new.pos;
         self.board_pos = new.board_pos;
 
-        self.state = new.state;
+        self.action = new.action;
 
-        self.histroy = vec![];
-
-    }
-
-    pub fn load_history(&mut self, histroy_idx: usize) {
-        if histroy_idx >= self.histroy.len() {
-            return;
-
-        }
-
-        let new = DrawableBoard::new(self.pos.0, self.pos.1, self.histroy[histroy_idx]);
-        
-        self.boardstate = new.boardstate;
-        self.prev_boardstate = Some(new.boardstate);
-        self.pieces = new.pieces;
-
-        self.state = new.state;
-
-        if histroy_idx == self.histroy.len() - 1 {
-            self.viewing_history = false;
-
-        } else {
-            self.viewing_history = true;
-            self.history_idx = histroy_idx;
-
-        }
 
     }
 
@@ -498,39 +457,27 @@ impl DrawableBoard {
         
         self.boardstate = new.boardstate;
         self.pieces = new.pieces;
-        self.state = new.state;
-
-    }
-
-    pub fn undo_history(&mut self) {
-        if self.histroy.len() > 1 {
-            self.histroy.pop();
-    
-            let new = DrawableBoard::new(self.pos.0, self.pos.1, self.histroy.last().unwrap().clone());
-            self.boardstate = new.boardstate;
-            self.prev_boardstate = Some(new.boardstate);
-            self.pieces = new.pieces;
-
-            self.state = new.state;
-
-        }
+        self.action = new.action;
 
     }
 
 }
 
-pub fn start_new_seach(engine: &mut UgiEngine, engine_side: f64, drawable_board: &mut DrawableBoard) {
-    engine.send("stop");
+pub fn start_new_seach(engine: &mut UgiEngine, drawable_board: &mut DrawableBoard) {
+    if engine.enabled {
+        engine.send("stop");
 
-    let setcmd = if engine_side == 1.0 {
-        format!("setpos data {}", drawable_board.boardstate_str())
-    } else {
-        format!("setpos data {}", drawable_board.flipped_boardstate_str())
-    };
+        let setcmd = if engine.side == 1.0 {
+            format!("setpos data {}", drawable_board.boardstate_str())
+        } else {
+            format!("setpos data {}", drawable_board.flipped_boardstate_str())
+        };
+    
+        engine.send(setcmd.as_str());
+    
+        engine.send("go");
 
-    engine.send(setcmd.as_str());
-
-    engine.send("go");
+    }
 
 }
 
@@ -640,12 +587,6 @@ pub fn flip_move(mv: Move) -> Move {
 
 }
 
-pub type Move = Vec<usize>;
-
-pub const COLOR_BOARD: Color = Color::new(160.0/255.0, 149.0/255.0, 115.0/255.0 , 1.0); // Hex: #a09573
-pub const COLOR_GRIDSPOT: Color = Color::new(175.0/255.0, 163.0/255.0, 126.0/255.0, 1.0); // Hex: #afa37e
-pub const COLOR_MOVE: Color = Color::new(0.0, 1.0, 0.0, 1.0);
-
 pub struct SearchSettings {
     pub engine_side: f32,
     pub max_ply: f32,
@@ -683,24 +624,29 @@ impl SearchInfo {
 
 }
 
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "gyges ui".to_owned(),
+        window_height: 900,
+        window_width: 1250,
+        window_resizable: false,
+        ..Default::default() 
+    }
+
+}
 #[macroquad::main(window_conf)]
 async fn main() {
     prevent_quit();
 
     let mut engine = UgiEngine::new("C:/Users/beckb/Documents/GitHub/GygesRust/target/release/gyges_engine.exe");
-    let mut engine_side = 1.0;
-    let mut ui_max_ply = 99.0;
-    let mut ui_max_time = 3600.0;
-
     engine.send("ugi");
 
     let mut best_search: SearchInfo = SearchInfo::new();
 
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    start_new_seach(&mut engine, engine_side, &mut drawable_board);
+    start_new_seach(&mut engine, &mut drawable_board);
 
-    let mut prev_boardstate = drawable_board.boardstate_str();
     loop {
         clear_background(LIGHTGRAY);
 
@@ -711,7 +657,8 @@ async fn main() {
 
         }
 
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 50.0 }, Vec2 { x: 250.0, y: 150.0 })
+        // Draw UI
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 50.0 }, Vec2 { x: 250.0, y: 100.0 })
             .label("Board Controls")
             .titlebar(true)
             .movable(false)
@@ -724,24 +671,39 @@ async fn main() {
                 ui.separator();
                 if ui.button(None, "Flip Board") {
                     drawable_board.flip();
-                    engine_side *= -1.0;
-
-                }
-                ui.separator();
-                if ui.button(None, "Change Player") {
-                    engine_side *= -1.0;
-                    start_new_seach(&mut engine, engine_side, &mut drawable_board);
-
-                }
-                ui.separator();
-                if ui.button(None, "Undo") {
-                    drawable_board.undo_history();
+                    engine.side *= -1.0;
 
                 }
 
             });
+
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 175.0}, Vec2 { x: 250.0, y: 125.0 })
+            .label("Engine Controls")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                if ui.button(None, "Stop") {
+                    engine.send("stop");
+                    engine.enabled = false;
+
+                }
+                ui.separator();
+                if ui.button(None, "Start") {
+                    engine.enabled = true;
+                    start_new_seach(&mut engine, &mut drawable_board);
+
+                }
+                ui.separator();
+                if ui.button(None, "Change Player") {
+                    engine.side *= -1.0;
+                    start_new_seach(&mut engine, &mut drawable_board);
+
+                }
+                
+            });
             
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 225.0 }, Vec2 { x: 250.0, y: 250.0 })
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 325.0 }, Vec2 { x: 250.0, y: 250.0 })
             .label("Search Info")
             .titlebar(true)
             .movable(false)
@@ -780,63 +742,32 @@ async fn main() {
                 }
 
             });
-
-        // widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 225.0 }, Vec2 { x: 250.0, y: 100.0 })
-        //     .label("Engine Settings")
-        //     .titlebar(true)
-        //     .movable(false)
-        //     .ui(&mut ui::root_ui(), |ui| {
-        //         ui.separator();
-        //         ui.slider(hash!(), "Max Ply", 1.0..7.0, &mut ui_max_ply);
-        //         ui.separator();
-        //         ui.slider(hash!(), "Max Time", 1.0..3600.0, &mut ui_max_time);
-
-        //         ui_max_ply = ui_max_ply.floor();
-        //         ui_max_time = ui_max_time.floor();
-
-        //     });
         
-        // widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 575.0 }, Vec2 { x: 100.0, y: 180.0 })
-        //     .label("History")
-        //     .titlebar(true)
-        //     .movable(false)
-        //     .ui(&mut ui::root_ui(), |ui| {
-        //         for i in 0..drawable_board.histroy.len() {
-        //             let y_pos = i as f32 * 20.0;
-
-        //             if ui.button(Vec2 { x: 10.0, y: y_pos }, format!("Board {}", i).as_str()) {
-        //                 drawable_board.load_history(i);
-
-        //             }
-                    
-        //         }
-
-        //     });
-
-        let current_boardstate = drawable_board.boardstate_str();
-        if current_boardstate != prev_boardstate && drawable_board.state == State::None {
-            prev_boardstate = current_boardstate.clone();
-
-            start_new_seach(&mut engine, engine_side, &mut drawable_board);
-
-            println!("STring: {}", drawable_board.boardstate_str());
-            println!("Flipped: {}", drawable_board.flipped_boardstate_str());
-
-        }
-
-        drawable_board.update();
+        
+        // Update and render board
+        if drawable_board.update() { 
+            start_new_seach(&mut engine, &mut drawable_board); 
+        };
         drawable_board.render();
 
-        if best_search.best_move != None {
-            drawable_board.render_move(best_search.best_move.clone().unwrap(), COLOR_MOVE);
+        // Render best move
+        if engine.enabled {
+            if best_search.best_move.is_some() {
+                drawable_board.render_move(best_search.best_move.clone().unwrap(), COLOR_MOVE);
+
+            }
+
+        } else {
+            best_search = SearchInfo::new();
 
         }
-
-        let r = engine.recive();
+        
+        // Recive data from engine
+        let r: Option<String> = engine.recive();
         if let Some(r) = r {
             let cmds = r.split_whitespace().collect::<Vec<&str>>();
             if cmds.get(0) == Some(&"info") {
-                best_search = parse_info_str(r.as_str(), engine_side);
+                best_search = parse_info_str(r.as_str(), engine.side);
 
             }
             
@@ -846,7 +777,7 @@ async fn main() {
 
     }
 
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     drop(engine);
 
 }
