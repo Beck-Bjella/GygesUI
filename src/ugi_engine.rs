@@ -4,12 +4,16 @@ use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::collections::VecDeque;
 
-use crate::DrawableBoard;
+use crate::{DrawableBoard, Move};
+
+pub const MAX_TIME: usize =  3600; // seconds
+pub const MAX_AUTO_TIME: usize = 3; // seconds
+pub const MAX_SINGLE_TIME: usize = 10; // seconds
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
-    Enabled,
     Disabled,
+    Analysis,
     Auto,
     Single
 
@@ -18,7 +22,10 @@ pub enum Mode {
 
 pub struct UgiEngine {
     pub mode: Mode,
+    pub searching: bool,
     pub side: f64,
+
+    pub best_search: SearchInfo,
 
     input_sender: Sender<String>,
     ouput_reciver: Receiver<String>,
@@ -30,6 +37,7 @@ pub struct UgiEngine {
     writer_quit_sender: Sender<bool>,
 
     recived_queue: VecDeque<String>,
+
 }
 
 impl UgiEngine {
@@ -61,9 +69,11 @@ impl UgiEngine {
         });
 
         return UgiEngine {
-            mode: Mode::Enabled,
-
+            mode: Mode::Disabled,
+            searching: false,
             side: 1.0,
+
+            best_search: SearchInfo::new(),
 
             input_sender,
             ouput_reciver,
@@ -83,6 +93,7 @@ impl UgiEngine {
     pub fn send(&mut self, cmd: &str) {
         self.input_sender.send(cmd.to_string()).expect("Failed to send data to the engine");
         println!("SENT: {}", cmd);
+
     }
 
     fn try_recive(&mut self) {
@@ -124,6 +135,7 @@ impl UgiEngine {
     pub fn stop(&mut self) {
         self.send("stop");
         self.mode = Mode::Disabled;
+        self.searching = false;
 
     }
 
@@ -139,9 +151,11 @@ impl UgiEngine {
 
     }
 
-    pub fn new_search(&mut self, max_time: usize, search_purpose: Mode, drawable_board: &mut DrawableBoard) {
-        if self.mode != Mode::Disabled {
+    pub fn new_search(&mut self, max_time: usize, search_purpose: Mode, drawable_board: &DrawableBoard) {
+        if self.searching {
             self.send("stop");
+            self.wait_for_search();
+
         }
 
         let setcmd = match self.side {
@@ -156,11 +170,192 @@ impl UgiEngine {
         self.send("go");
 
         self.mode = search_purpose;
+        self.searching = true;
     
     }
+
+    pub fn wait_for_search(&mut self) {
+        loop {
+            self.try_recive();
+            if self.recived_queue.len() == 0 {
+                continue;
+
+            }
+
+            let line = self.recived_queue.pop_back().unwrap();
+            if line.starts_with("bestmove") {
+                break;
+
+            }
+
+        }
+
+    }
     
+    pub fn update(&mut self, drawable_board: &mut DrawableBoard) {
+        match self.mode {
+            Mode::Disabled => { // Reset best_search if disabled
+                self.best_search = SearchInfo::new();
+            },
+            _ => {}
+
+        }
+
+
+        let recived: Option<String> = self.recive();
+        if let Some(data) = recived {
+            let cmds = data.split_whitespace().collect::<Vec<&str>>();
+            match cmds.get(0) {
+                Some(&"bestmove") => {
+                    self.searching = false;
+
+                    match self.mode {
+                        Mode::Single => {
+                            let best_move = self.parse_bestmove_str(cmds.get(1).unwrap());
+
+                            drawable_board.make_move(best_move);
+                            self.stop();
+   
+                        },
+                        Mode::Auto => {
+                            let best_move = self.parse_bestmove_str(cmds.get(1).unwrap());
+
+                            drawable_board.make_move(best_move);
+    
+                            if drawable_board.game_over() {
+                                self.stop();
+    
+                            } else {
+                                self.flip_side();
+                                self.new_search(MAX_AUTO_TIME, Mode::Auto, drawable_board);
+
+                            }
+                                
+                        },
+                        _ => {}
+
+                    }
+
+                },
+                Some(&"info") => {
+                    self.best_search = self.parse_info_str(data.as_str());
+
+                },
+                _ => {}
+
+            }
+            
+        }
+
+    }
+
+    // ========================
+    
+    pub fn parse_bestmove_str(&self, raw_move: &str) -> Move {
+        let raw_mv_data: Vec<&str> = raw_move.split("|").collect();
+
+        let mut mv = vec![];
+        for i in 0..raw_mv_data.len() {
+            mv.push(raw_mv_data[i].parse::<usize>().unwrap());
+
+        }
+
+        if self.side == -1.0 {
+            return flip_move(mv);
+
+        }
+        return mv;
+
+    }
+
+    pub fn parse_info_str(&self, info_str: &str) -> SearchInfo {
+        let mut search_info = SearchInfo::new();
+
+        let mut raw_cmds: Vec<&str> = info_str.split_whitespace().collect();
+        if raw_cmds.get(0) == Some(&"info") {
+            raw_cmds.remove(0);
+
+            let cmd_groups = raw_cmds.chunks(2).map(|x| [x[0], x[1]]).collect::<Vec<[&str; 2]>>();
+            for group in cmd_groups {
+                match group[0] {
+                    "ply" => {
+                        let ply = group[1].parse::<f64>().unwrap();
+                        search_info.ply = Some(ply);
+
+                    },
+                    "bestmove" => {
+                        let best_move = self.parse_bestmove_str(group[1]);
+                        search_info.best_move = Some(best_move);
+
+                    },
+                    "score" => {
+                        let score = group[1].parse::<f64>().unwrap();
+                        search_info.score = Some(score);
+
+                    },
+                    "nodes" => {
+                        let nodes = group[1].parse::<f64>().unwrap();
+                        search_info.nodes = Some(nodes);
+
+                    },
+                    "nps" => {
+                        let nps = group[1].parse::<f64>().unwrap();
+                        search_info.nps = Some(nps);
+
+                    },
+                    "abf" => {
+                        let abf = group[1].parse::<f64>().unwrap();
+                        search_info.abf = Some(abf);
+
+                    },
+                    "beta_cuts" => {
+                        let beta_cuts = group[1].parse::<f64>().unwrap();
+                        search_info.beta_cuts = Some(beta_cuts);
+
+                    },
+                    "time" => {
+                        let time = group[1].parse::<f64>().unwrap();
+                        search_info.time = Some(time);
+
+                    },
+                    _ => {}
+                
+                }
+
+            }
+
+            return search_info;
+
+        }
+
+        return SearchInfo::new();
+
+    }
+
 }
 
+// Helper function to flip a move
+pub fn flip_move(mv: Move) -> Move {
+    let mut flipped_mv = vec![];
+    for i in 0..mv.len() {
+        if mv[i] == 37 {
+            flipped_mv.push(36);
+            continue;
+
+        } else if mv[i] == 36 {
+            flipped_mv.push(37);
+            continue;
+
+        }
+
+        flipped_mv.push(35 - mv[i]);
+
+    }
+
+    return flipped_mv;
+
+
+}
 
 struct UgiReader {
     data_out: Sender<String>,
@@ -255,4 +450,43 @@ impl UgiWriter {
 
     }
     
+}
+
+
+
+pub struct SearchSettings {
+    pub engine_side: f32,
+    pub max_ply: f32,
+    pub max_time: f32,
+
+}
+
+#[derive(Debug)]
+pub struct SearchInfo {
+    pub ply: Option<f64>,
+    pub best_move: Option<Move>,
+    pub score: Option<f64>,
+    pub nodes: Option<f64>,
+    pub nps: Option<f64>,
+    pub abf: Option<f64>,
+    pub beta_cuts: Option<f64>,
+    pub time: Option<f64>,
+
+}
+impl SearchInfo {
+    pub fn new() -> SearchInfo {
+        return SearchInfo {
+            ply: None,
+            best_move: None,
+            score: None,
+            nodes: None,
+            nps: None,
+            abf: None,
+            beta_cuts: None,
+            time: None,
+
+        };
+
+    }
+
 }

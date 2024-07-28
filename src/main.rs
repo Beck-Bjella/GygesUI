@@ -1,9 +1,10 @@
 mod ugi_engine;
 
 use macroquad::prelude::*;
+use macroquad::telemetry::frame;
 use macroquad::ui::{self, widgets, hash};
 
-use ugi_engine::{Mode, UgiEngine};
+use ugi_engine::{Mode, UgiEngine, MAX_AUTO_TIME, MAX_SINGLE_TIME, MAX_TIME};
 
 
 // Constants
@@ -507,159 +508,16 @@ impl DrawableBoard {
 
 }
 
-pub fn parse_bestmove_str(raw_move: &str, engine_side: f64) -> Move {
-    let raw_mv_data: Vec<&str> = raw_move.split("|").collect();
-
-    let mut mv = vec![];
-    for i in 0..raw_mv_data.len() {
-        mv.push(raw_mv_data[i].parse::<usize>().unwrap());
-
-    }
-
-    if engine_side == -1.0 {
-        return flip_move(mv);
-
-    }
-    return mv;
-
-}
-
-pub fn parse_info_str(info_str: &str, engine_side: f64) -> SearchInfo {
-    let mut search_info = SearchInfo::new();
-
-    let mut raw_cmds: Vec<&str> = info_str.split_whitespace().collect();
-    if raw_cmds.get(0) == Some(&"info") {
-        raw_cmds.remove(0);
-
-        let cmd_groups = raw_cmds.chunks(2).map(|x| [x[0], x[1]]).collect::<Vec<[&str; 2]>>();
-        for group in cmd_groups {
-            match group[0] {
-                "ply" => {
-                    let ply = group[1].parse::<f64>().unwrap();
-                    search_info.ply = Some(ply);
-
-                },
-                "bestmove" => {
-                    let best_move = parse_bestmove_str(group[1], engine_side);
-                    search_info.best_move = Some(best_move);
-
-                },
-                "score" => {
-                    let score = group[1].parse::<f64>().unwrap();
-                    search_info.score = Some(score);
-
-                },
-                "nodes" => {
-                    let nodes = group[1].parse::<f64>().unwrap();
-                    search_info.nodes = Some(nodes);
-
-                },
-                "nps" => {
-                    let nps = group[1].parse::<f64>().unwrap();
-                    search_info.nps = Some(nps);
-
-                },
-                "abf" => {
-                    let abf = group[1].parse::<f64>().unwrap();
-                    search_info.abf = Some(abf);
-
-                },
-                "beta_cuts" => {
-                    let beta_cuts = group[1].parse::<f64>().unwrap();
-                    search_info.beta_cuts = Some(beta_cuts);
-
-                },
-                "time" => {
-                    let time = group[1].parse::<f64>().unwrap();
-                    search_info.time = Some(time);
-
-                },
-                _ => {}
-               
-            }
-
-        }
-
-        return search_info;
-
-    }
-
-    return SearchInfo::new();
-
-}
-
-pub fn flip_move(mv: Move) -> Move {
-    let mut flipped_mv = vec![];
-    for i in 0..mv.len() {
-        if mv[i] == 37 {
-            flipped_mv.push(36);
-            continue;
-
-        } else if mv[i] == 36 {
-            flipped_mv.push(37);
-            continue;
-
-        }
-
-        flipped_mv.push(35 - mv[i]);
-
-    }
-
-    return flipped_mv;
-
-
-}
-
-pub struct SearchSettings {
-    pub engine_side: f32,
-    pub max_ply: f32,
-    pub max_time: f32,
-
-}
-
-#[derive(Debug)]
-pub struct SearchInfo {
-    pub ply: Option<f64>,
-    pub best_move: Option<Move>,
-    pub score: Option<f64>,
-    pub nodes: Option<f64>,
-    pub nps: Option<f64>,
-    pub abf: Option<f64>,
-    pub beta_cuts: Option<f64>,
-    pub time: Option<f64>,
-
-}
-impl SearchInfo {
-    pub fn new() -> SearchInfo {
-        return SearchInfo {
-            ply: None,
-            best_move: None,
-            score: None,
-            nodes: None,
-            nps: None,
-            abf: None,
-            beta_cuts: None,
-            time: None,
-
-        };
-
-    }
-
-}
-
 fn window_conf() -> Conf {
     Conf {
         window_title: "gyges ui".to_owned(),
         window_height: 900,
-        window_width: 1250,
+        window_width: 1500,
         window_resizable: false,
         ..Default::default() 
     }
 
 }
-
-pub const MAX_TIME: usize =  3600; // seconds
-pub const MAX_AUTO_TIME: usize = 3; // seconds
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -668,11 +526,9 @@ async fn main() {
     let mut engine = UgiEngine::new("C:/Users/beckb/Documents/GitHub/GygesRust/target/release/gyges_engine.exe");
     engine.send("ugi");
 
-    let mut best_search: SearchInfo = SearchInfo::new();
-
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
 
     loop {
         clear_background(LIGHTGRAY);
@@ -704,7 +560,7 @@ async fn main() {
             });
 
         widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 175.0}, Vec2 { x: 250.0, y: 125.0 })
-            .label("Engine Controls")
+            .label("Analysis Controls")
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
@@ -715,53 +571,53 @@ async fn main() {
                 }
                 ui.separator();
                 if ui.button(None, "Start") {
-                    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+                    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
 
 
                 }
                 ui.separator();
                 if ui.button(None, "Change Player") {
                     engine.flip_side();
-                    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+                    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
                     
                 }
                 
             });
             
         widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 325.0 }, Vec2 { x: 250.0, y: 250.0 })
-            .label("Search Info")
+            .label("Analysis Info")
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
-                if let Some(ply) = &best_search.ply {
+                if let Some(ply) = &engine.best_search.ply {
                     ui.label(None, format!("Ply: {}", ply).as_str());
 
                 }
-                if let Some(score) = &best_search.score {
+                if let Some(score) = &engine.best_search.score {
                     ui.label(None, format!("Score: {}", score).as_str());
 
                 }
-                if let Some(best_move) = &best_search.best_move {
+                if let Some(best_move) = &engine.best_search.best_move {
                     ui.label(None, format!("Best Move: {:?}", best_move).as_str());
 
                 }
-                if let Some(nodes) = &best_search.nodes {
+                if let Some(nodes) = &engine.best_search.nodes {
                     ui.label(None, format!("Nodes: {}", nodes).as_str());
 
                 }
-                if let Some(nps) = &best_search.nps {
+                if let Some(nps) = &engine.best_search.nps {
                     ui.label(None, format!("NPS: {}", nps).as_str());
 
                 }
-                if let Some(abf) = &best_search.abf {
+                if let Some(abf) = &engine.best_search.abf {
                     ui.label(None, format!("ABF: {}", abf).as_str());
 
                 }
-                if let Some(beta_cuts) = &best_search.beta_cuts {
+                if let Some(beta_cuts) = &engine.best_search.beta_cuts {
                     ui.label(None, format!("Beta Cuts: {}", beta_cuts).as_str());
 
                 }
-                if let Some(time) = &best_search.time {
+                if let Some(time) = &engine.best_search.time {
                     ui.label(None, format!("Time: {}", time).as_str());
 
                 }
@@ -775,7 +631,7 @@ async fn main() {
             .ui(&mut ui::root_ui(), |ui| {
                 ui.separator();
                 if ui.button(None, "Start") {
-                    engine.new_search(3, Mode::Auto, &mut drawable_board);
+                    engine.new_search(MAX_AUTO_TIME, Mode::Auto, &mut drawable_board);
 
                 }
                 ui.separator();
@@ -790,93 +646,52 @@ async fn main() {
                 ui.separator();
                 if ui.button(None, "P1") {
                     engine.set_side(1.0);
-                    engine.new_search(3, Mode::Single, &mut drawable_board);
+                    engine.new_search(MAX_AUTO_TIME, Mode::Single, &mut drawable_board);
 
                 }
                 ui.separator();
                 if ui.button(None, "P2") {
                     engine.set_side(-1.0);
-                    engine.new_search(MAX_AUTO_TIME, Mode::Single, &mut drawable_board);
+                    engine.new_search(MAX_SINGLE_TIME, Mode::Single, &mut drawable_board);
 
                 }
 
             });
 
         // Update and render board
-        if drawable_board.update() && engine.mode == Mode::Enabled { 
-            engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+        if drawable_board.update() && engine.mode == Mode::Analysis{ 
+            engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
 
         };
         drawable_board.render();
 
+        // Update Engine
+        engine.update(&mut drawable_board);
+
         // Render best move
         match engine.mode {
-            Mode::Disabled => { best_search = SearchInfo::new() },
-            Mode::Enabled | Mode::Single => {
-                if best_search.best_move.is_some() {
-                    drawable_board.render_move(best_search.best_move.clone().unwrap(), P1_MOVE);
+            Mode::Analysis | Mode::Single => {
+                if engine.best_search.best_move.is_some() {
+                    drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
 
                 }
 
             },
             ugi_engine::Mode::Auto => {
-                if best_search.best_move.is_some() {
+                if engine.best_search.best_move.is_some() {
                     if engine.side == 1.0 {
-                        drawable_board.render_move(best_search.best_move.clone().unwrap(), P1_MOVE);
+                        drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
 
                     } else {
-                        drawable_board.render_move(best_search.best_move.clone().unwrap(), P2_MOVE);
+                        drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P2_MOVE);
 
                     }
 
                 }
 
             },
+            _ => {}
 
-        }
-
-        // Recive data from engine
-        let r: Option<String> = engine.recive();
-        if let Some(r) = r {
-            let cmds = r.split_whitespace().collect::<Vec<&str>>();
-            match cmds.get(0) {
-                Some(&"bestmove") => {
-                    match engine.mode {
-                        ugi_engine::Mode::Disabled => {},
-                        ugi_engine::Mode::Enabled => {},
-                        ugi_engine::Mode::Single => {
-                            let best_move = parse_bestmove_str(cmds.get(1).unwrap(), engine.side);
-
-                            drawable_board.make_move(best_move);
-                            engine.stop();
-   
-                        },
-                        ugi_engine::Mode::Auto => {
-                            let best_move = parse_bestmove_str(cmds.get(1).unwrap(), engine.side);
-
-                            drawable_board.make_move(best_move);
-    
-                            if drawable_board.game_over() {
-                                engine.stop();
-    
-                            }
-                                
-                            engine.flip_side();
-                            engine.new_search(MAX_AUTO_TIME, Mode::Auto, &mut drawable_board);
-
-                        }
-
-                    }
-
-                },
-                Some(&"info") => {
-                    best_search = parse_info_str(r.as_str(), engine.side);
-
-                },
-                _ => {}
-
-            }
-            
         }
 
         next_frame().await;
