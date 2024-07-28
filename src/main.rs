@@ -1,12 +1,9 @@
 mod ugi_engine;
 
-use std::hash;
-
-use camera::mouse;
 use macroquad::prelude::*;
 use macroquad::ui::{self, widgets, hash};
 
-use ugi_engine::UgiEngine;
+use ugi_engine::{Mode, UgiEngine};
 
 
 // Constants
@@ -31,7 +28,8 @@ pub const PIECE_RADIUS: f32 = 30.0;
 
 pub const COLOR_BOARD: Color = Color::new(160.0/255.0, 149.0/255.0, 115.0/255.0 , 1.0); // Hex: #a09573
 pub const COLOR_GRIDSPOT: Color = Color::new(175.0/255.0, 163.0/255.0, 126.0/255.0, 1.0); // Hex: #afa37e
-pub const COLOR_MOVE: Color = Color::new(0.0, 1.0, 0.0, 1.0); // Lime Green
+pub const P1_MOVE: Color = Color::new(0.0, 1.0, 0.0, 1.0);
+pub const P2_MOVE: Color = Color::new(1.0, 0.0, 1.0, 1.0);
 
 pub type Move = Vec<usize>;
 pub type BoardState = [usize; 38];
@@ -97,7 +95,7 @@ impl Piece {
 pub enum Action {
     None,
     Dragging(usize),
-    Dropping(usize)
+    Dropping(usize),
 
 }
 
@@ -112,6 +110,8 @@ pub struct DrawableBoard {
     board_pos: (f32, f32),
 
     action: Action,
+
+    flipped: bool,
 
 }
 
@@ -129,6 +129,8 @@ impl DrawableBoard {
             board_pos,
             
             action: Action::None,
+
+            flipped: false,
 
         };
 
@@ -281,7 +283,7 @@ impl DrawableBoard {
     }
     
     /// Returns true if the boardstate changed this frame
-    pub fn update(&mut self) -> bool{
+    pub fn update(&mut self) -> bool {
         let mouse_pos = mouse_position();
 
         match self.action {
@@ -390,17 +392,19 @@ impl DrawableBoard {
         // Draw box around whole board
         draw_rectangle_lines(self.pos.0, self.pos.1, BOARD_WIDTH, BOARD_HEIGHT, 2.0, BLACK);
 
-        // // Draw a box around where the piece will be placed
-        // if self.state != State::None {
-        //     let mouse_pos = mouse_position();
-        //     let (snap_pos, _) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, false);
-        //     if let Some(snap_pos) = snap_pos {
-        //         let pos = self.get_pos(snap_pos);
-        //         draw_rectangle_lines(pos.0 - 37.5, pos.1 - 37.5, 75.0, 75.0, 2.0, BLACK);
+        // Draw a box around where the piece will be placed
+        if self.action != Action::None {
+            let mouse_pos = mouse_position();
 
-        //     }
+            let dropping = matches!(self.action, Action::Dropping(_));
+            let (snap_pos, _) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, dropping);
+            if let Some(snap_pos) = snap_pos {
+                let pos = self.get_pos(snap_pos);
+                draw_rectangle_lines(pos.0 - 37.5, pos.1 - 37.5, 75.0, 75.0, 2.0, BLACK);
 
-        // }
+            }
+
+        }
 
     }
 
@@ -421,6 +425,40 @@ impl DrawableBoard {
 
     }
 
+    pub fn make_move(&mut self, mv: Move) {
+        let mut new_state = self.boardstate.clone();
+        if mv.len() == 0 {
+            return;
+
+        }
+        if mv.len() == 2 {
+            let piece = new_state[mv[0]];
+            new_state[mv[0]] = 0;
+            new_state[mv[1]] = piece;
+
+        } else if mv.len() == 3 {
+            let piece1 = new_state[mv[0]];
+            let piece2 = new_state[mv[1]];
+            new_state[mv[0]] = 0;
+            new_state[mv[1]] = piece1;
+            new_state[mv[2]] = piece2;
+            
+        }
+
+        let new = DrawableBoard::new(self.pos.0, self.pos.1, new_state);
+        
+        self.boardstate = new.boardstate;
+        self.prev_boardstate = None;
+
+        self.pieces = new.pieces;
+
+        self.pos = new.pos;
+        self.board_pos = new.board_pos;
+
+        self.action = new.action;
+
+    }
+
     pub fn reset(&mut self) {
         let new = DrawableBoard::new(self.pos.0, self.pos.1, STARTING_BOARD);
         
@@ -433,7 +471,6 @@ impl DrawableBoard {
         self.board_pos = new.board_pos;
 
         self.action = new.action;
-
 
     }
 
@@ -459,29 +496,18 @@ impl DrawableBoard {
         self.pieces = new.pieces;
         self.action = new.action;
 
+        self.flipped = !self.flipped;
+
     }
 
-}
-
-pub fn start_new_seach(engine: &mut UgiEngine, drawable_board: &mut DrawableBoard) {
-    if engine.enabled {
-        engine.send("stop");
-
-        let setcmd = if engine.side == 1.0 {
-            format!("setpos data {}", drawable_board.boardstate_str())
-        } else {
-            format!("setpos data {}", drawable_board.flipped_boardstate_str())
-        };
-    
-        engine.send(setcmd.as_str());
-    
-        engine.send("go");
+    pub fn game_over(&self) -> bool {
+        return self.boardstate[36] != 0 || self.boardstate[37] != 0;
 
     }
 
 }
 
-pub fn parse_bestmove_str(raw_move: &str) -> Move {
+pub fn parse_bestmove_str(raw_move: &str, engine_side: f64) -> Move {
     let raw_mv_data: Vec<&str> = raw_move.split("|").collect();
 
     let mut mv = vec![];
@@ -490,6 +516,10 @@ pub fn parse_bestmove_str(raw_move: &str) -> Move {
 
     }
 
+    if engine_side == -1.0 {
+        return flip_move(mv);
+
+    }
     return mv;
 
 }
@@ -510,14 +540,7 @@ pub fn parse_info_str(info_str: &str, engine_side: f64) -> SearchInfo {
 
                 },
                 "bestmove" => {
-                    let best_move = if engine_side == 1.0 {
-                        parse_bestmove_str(group[1])
-
-                    } else {
-                        flip_move(parse_bestmove_str(group[1]))
-
-                    };
-
+                    let best_move = parse_bestmove_str(group[1], engine_side);
                     search_info.best_move = Some(best_move);
 
                 },
@@ -634,6 +657,10 @@ fn window_conf() -> Conf {
     }
 
 }
+
+pub const MAX_TIME: usize =  3600; // seconds
+pub const MAX_AUTO_TIME: usize = 3; // seconds
+
 #[macroquad::main(window_conf)]
 async fn main() {
     prevent_quit();
@@ -645,14 +672,13 @@ async fn main() {
 
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    start_new_seach(&mut engine, &mut drawable_board);
+    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
 
     loop {
         clear_background(LIGHTGRAY);
 
         if is_quit_requested() {
-            engine.send("stop");
-            engine.send("quit");
+            engine.quit();
             break;
 
         }
@@ -671,7 +697,7 @@ async fn main() {
                 ui.separator();
                 if ui.button(None, "Flip Board") {
                     drawable_board.flip();
-                    engine.side *= -1.0;
+                    engine.flip_side();
 
                 }
 
@@ -684,21 +710,20 @@ async fn main() {
             .ui(&mut ui::root_ui(), |ui| {
                 ui.separator();
                 if ui.button(None, "Stop") {
-                    engine.send("stop");
-                    engine.enabled = false;
+                    engine.stop();
 
                 }
                 ui.separator();
                 if ui.button(None, "Start") {
-                    engine.enabled = true;
-                    start_new_seach(&mut engine, &mut drawable_board);
+                    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+
 
                 }
                 ui.separator();
                 if ui.button(None, "Change Player") {
-                    engine.side *= -1.0;
-                    start_new_seach(&mut engine, &mut drawable_board);
-
+                    engine.flip_side();
+                    engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+                    
                 }
                 
             });
@@ -742,32 +767,113 @@ async fn main() {
                 }
 
             });
-        
-        
+
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 600.0 }, Vec2 { x: 250.0, y: 50.0 })
+            .label("Auto Play")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                if ui.button(None, "Start") {
+                    engine.new_search(3, Mode::Auto, &mut drawable_board);
+
+                }
+                ui.separator();
+
+            });
+
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 675.0 }, Vec2 { x: 250.0, y: 100.0 })
+            .label("Single Move")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                if ui.button(None, "P1") {
+                    engine.set_side(1.0);
+                    engine.new_search(3, Mode::Single, &mut drawable_board);
+
+                }
+                ui.separator();
+                if ui.button(None, "P2") {
+                    engine.set_side(-1.0);
+                    engine.new_search(MAX_AUTO_TIME, Mode::Single, &mut drawable_board);
+
+                }
+
+            });
+
         // Update and render board
-        if drawable_board.update() { 
-            start_new_seach(&mut engine, &mut drawable_board); 
+        if drawable_board.update() && engine.mode == Mode::Enabled { 
+            engine.new_search(MAX_TIME, Mode::Enabled, &mut drawable_board);
+
         };
         drawable_board.render();
 
         // Render best move
-        if engine.enabled {
-            if best_search.best_move.is_some() {
-                drawable_board.render_move(best_search.best_move.clone().unwrap(), COLOR_MOVE);
+        match engine.mode {
+            Mode::Disabled => { best_search = SearchInfo::new() },
+            Mode::Enabled | Mode::Single => {
+                if best_search.best_move.is_some() {
+                    drawable_board.render_move(best_search.best_move.clone().unwrap(), P1_MOVE);
 
-            }
+                }
 
-        } else {
-            best_search = SearchInfo::new();
+            },
+            ugi_engine::Mode::Auto => {
+                if best_search.best_move.is_some() {
+                    if engine.side == 1.0 {
+                        drawable_board.render_move(best_search.best_move.clone().unwrap(), P1_MOVE);
+
+                    } else {
+                        drawable_board.render_move(best_search.best_move.clone().unwrap(), P2_MOVE);
+
+                    }
+
+                }
+
+            },
 
         }
-        
+
         // Recive data from engine
         let r: Option<String> = engine.recive();
         if let Some(r) = r {
             let cmds = r.split_whitespace().collect::<Vec<&str>>();
-            if cmds.get(0) == Some(&"info") {
-                best_search = parse_info_str(r.as_str(), engine.side);
+            match cmds.get(0) {
+                Some(&"bestmove") => {
+                    match engine.mode {
+                        ugi_engine::Mode::Disabled => {},
+                        ugi_engine::Mode::Enabled => {},
+                        ugi_engine::Mode::Single => {
+                            let best_move = parse_bestmove_str(cmds.get(1).unwrap(), engine.side);
+
+                            drawable_board.make_move(best_move);
+                            engine.stop();
+   
+                        },
+                        ugi_engine::Mode::Auto => {
+                            let best_move = parse_bestmove_str(cmds.get(1).unwrap(), engine.side);
+
+                            drawable_board.make_move(best_move);
+    
+                            if drawable_board.game_over() {
+                                engine.stop();
+    
+                            }
+                                
+                            engine.flip_side();
+                            engine.new_search(MAX_AUTO_TIME, Mode::Auto, &mut drawable_board);
+
+                        }
+
+                    }
+
+                },
+                Some(&"info") => {
+                    best_search = parse_info_str(r.as_str(), engine.side);
+
+                },
+                _ => {}
 
             }
             

@@ -4,10 +4,22 @@ use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::collections::VecDeque;
 
+use crate::DrawableBoard;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    Enabled,
+    Disabled,
+    Auto,
+    Single
+
+}
+
+
 pub struct UgiEngine {
-    pub enabled: bool,
+    pub mode: Mode,
     pub side: f64,
-    
+
     input_sender: Sender<String>,
     ouput_reciver: Receiver<String>,
 
@@ -49,7 +61,8 @@ impl UgiEngine {
         });
 
         return UgiEngine {
-            enabled: true,
+            mode: Mode::Enabled,
+
             side: 1.0,
 
             input_sender,
@@ -67,25 +80,15 @@ impl UgiEngine {
 
     }
 
-    pub fn quit(&mut self) {
-        self.send("quit");
-
-        self.reader_quit_sender.send(true).unwrap();
-        self.writer_quit_sender.send(true).unwrap();
-
-        self.reader_thread.take().unwrap().join().unwrap();
-        self.writer_thread.take().unwrap().join().unwrap();
-
-    }
-
     pub fn send(&mut self, cmd: &str) {
         self.input_sender.send(cmd.to_string()).expect("Failed to send data to the engine");
-
+        println!("SENT: {}", cmd);
     }
 
     fn try_recive(&mut self) {
         match self.ouput_reciver.try_recv() {
             Ok(s) => {
+                println!("RECIVED: {}", s.clone());
                 self.recived_queue.push_front(s.clone());
 
             }
@@ -106,6 +109,56 @@ impl UgiEngine {
     
     }
 
+    // ========================
+
+    pub fn flip_side(&mut self) {
+        self.side *= -1.0;
+
+    }   
+
+    pub fn set_side(&mut self, side: f64) {
+        self.side = side;
+
+    }
+
+    pub fn stop(&mut self) {
+        self.send("stop");
+        self.mode = Mode::Disabled;
+
+    }
+
+    pub fn quit(&mut self) {
+        self.stop();
+        self.send("quit");
+
+        self.reader_quit_sender.send(true).unwrap();
+        self.writer_quit_sender.send(true).unwrap();
+
+        self.reader_thread.take().unwrap().join().unwrap();
+        self.writer_thread.take().unwrap().join().unwrap();
+
+    }
+
+    pub fn new_search(&mut self, max_time: usize, search_purpose: Mode, drawable_board: &mut DrawableBoard) {
+        if self.mode != Mode::Disabled {
+            self.send("stop");
+        }
+
+        let setcmd = match self.side {
+            1.0 => { format!("setpos data {}", drawable_board.boardstate_str()) },
+            _ => { format!("setpos data {}", drawable_board.flipped_boardstate_str()) },
+        };
+        self.send(setcmd.as_str());
+
+        let maxtime_cmd = format!("setoption max_time {}",max_time);
+        self.send(maxtime_cmd.as_str());
+    
+        self.send("go");
+
+        self.mode = search_purpose;
+    
+    }
+    
 }
 
 
