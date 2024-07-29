@@ -1,10 +1,9 @@
 mod ugi_engine;
 
 use macroquad::prelude::*;
-use macroquad::telemetry::frame;
 use macroquad::ui::{self, widgets, hash};
 
-use ugi_engine::{Mode, UgiEngine, MAX_AUTO_TIME, MAX_SINGLE_TIME, MAX_TIME};
+use ugi_engine::{Mode, UgiEngine, MAX_PLY, MAX_TIME};
 
 
 // Constants
@@ -359,7 +358,7 @@ impl DrawableBoard {
 
     }
 
-    pub fn render(&self) {
+    pub fn render(&self, engine: &UgiEngine) {
         // Board
         draw_poly(self.pos.0 + 450.0, self.pos.1 + 450.0, 4, 450.0, 0.0, COLOR_BOARD);
         
@@ -390,7 +389,7 @@ impl DrawableBoard {
 
         }
 
-        // Draw box around whole board
+        // Box around whole board
         draw_rectangle_lines(self.pos.0, self.pos.1, BOARD_WIDTH, BOARD_HEIGHT, 2.0, BLACK);
 
         // Draw a box around where the piece will be placed
@@ -404,6 +403,28 @@ impl DrawableBoard {
                 draw_rectangle_lines(pos.0 - 37.5, pos.1 - 37.5, 75.0, 75.0, 2.0, BLACK);
 
             }
+
+        }
+
+        // Player Text
+        let text_params = TextParams { font: None, font_size: 40, font_scale: 1.0, font_scale_aspect: 1.0, rotation: 0.0, color: BLACK };
+
+        let p1_text = "P1";
+        let p2_text = "P2";
+        let p1_text_size = measure_text(p1_text, None, 40, 1.0);
+        let p2_text_size = measure_text(p2_text, None, 40, 1.0);
+        draw_text_ex(p1_text, self.pos.0 + 125.0 - (p2_text_size.width / 2.0), self.pos.1 + 775.0 + (p2_text_size.height / 2.0), text_params.clone());
+        draw_text_ex(p2_text, self.pos.0 + 125.0 - (p1_text_size.width / 2.0), self.pos.1 + 125.0 + (p1_text_size.height / 2.0), text_params);
+        
+        // Draw a box around the names
+        if engine.side == 1.0 {
+            draw_rectangle_lines(self.pos.0 + 100.0, self.pos.1 + 100.0, 50.0, 50.0, 7.0, BLACK);
+            draw_rectangle_lines(self.pos.0 + 100.0, self.pos.1 + 750.0, 50.0, 50.0, 7.0, P1_MOVE);
+
+        } else {
+            draw_rectangle_lines(self.pos.0 + 100.0, self.pos.1 + 100.0, 50.0, 50.0, 7.0, P1_MOVE);
+            draw_rectangle_lines(self.pos.0 + 100.0, self.pos.1 + 750.0, 50.0, 50.0, 7.0, BLACK);
+            
 
         }
 
@@ -490,6 +511,9 @@ impl DrawableBoard {
 
         }
 
+        flipped_boardstate[36] = self.boardstate[37];
+        flipped_boardstate[37] = self.boardstate[36];
+
 
         let new = DrawableBoard::new(self.pos.0, self.pos.1, flipped_boardstate);
         
@@ -512,7 +536,7 @@ fn window_conf() -> Conf {
     Conf {
         window_title: "gyges ui".to_owned(),
         window_height: 900,
-        window_width: 1500,
+        window_width: 1600,
         window_resizable: false,
         ..Default::default() 
     }
@@ -523,12 +547,20 @@ fn window_conf() -> Conf {
 async fn main() {
     prevent_quit();
 
-    let mut engine = UgiEngine::new("C:/Users/beckb/Documents/GitHub/GygesRust/target/release/gyges_engine.exe");
-    engine.send("ugi");
-
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
+    let mut engine = UgiEngine::new("C:/Users/beckb/Documents/GitHub/GygesRust/target/release/gyges_engine.exe");
+    engine.send("ugi");
+    engine.new_search(Mode::Analysis, &mut drawable_board);
+
+    let mut p1_maxtime: String = MAX_TIME.to_string();
+    let mut p2_maxtime: String = MAX_TIME.to_string();
+
+    let mut p1_maxply_option: usize = 0;
+    let mut p1_maxply: Option<String> = None;
+
+    let mut p2_maxply_option: usize = 0;
+    let mut p2_maxply: Option<String> = None;
 
     loop {
         clear_background(LIGHTGRAY);
@@ -553,38 +585,41 @@ async fn main() {
                 ui.separator();
                 if ui.button(None, "Flip Board") {
                     drawable_board.flip();
-                    engine.flip_side();
 
                 }
 
             });
 
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 175.0}, Vec2 { x: 250.0, y: 125.0 })
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 250.0}, Vec2 { x: 250.0, y: 125.0 })
             .label("Analysis Controls")
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
                 ui.separator();
-                if ui.button(None, "Stop") {
-                    engine.stop();
+                if ui.button(None, "Enable") && !drawable_board.game_over() {
+                    engine.new_search(Mode::Analysis, &mut drawable_board);
+
 
                 }
                 ui.separator();
-                if ui.button(None, "Start") {
-                    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
-
+                if ui.button(None, "Disable") && !drawable_board.game_over()  {
+                    engine.stop();
 
                 }
                 ui.separator();
                 if ui.button(None, "Change Player") {
                     engine.flip_side();
-                    engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
+
+                    if engine.searching || engine.mode != Mode::Disabled {
+                        engine.new_search(Mode::Analysis, &mut drawable_board);
+
+                    } 
                     
                 }
                 
             });
             
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 325.0 }, Vec2 { x: 250.0, y: 250.0 })
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 400.0 }, Vec2 { x: 250.0, y: 225.0 })
             .label("Analysis Info")
             .titlebar(true)
             .movable(false)
@@ -621,76 +656,153 @@ async fn main() {
                     ui.label(None, format!("Time: {}", time).as_str());
 
                 }
-
+                
             });
 
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 600.0 }, Vec2 { x: 250.0, y: 50.0 })
-            .label("Auto Play")
+        widgets::Window::new(hash!(), Vec2 { x: 1250.0, y: 250.0 }, Vec2 { x: 300.0, y: 125.0 })
+            .label("P1 Engine Settings")
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
                 ui.separator();
-                if ui.button(None, "Start") {
-                    engine.new_search(MAX_AUTO_TIME, Mode::Auto, &mut drawable_board);
-
-                }
+                ui.input_text(hash!(), "Max Time (seconds)", &mut p1_maxtime);
+                ui.separator();
+                ui.combo_box(hash!(), "Max Ply", vec!["None", "1", "3", "5", "7"].as_slice(), &mut p1_maxply_option);
                 ui.separator();
 
-            });
-
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 675.0 }, Vec2 { x: 250.0, y: 100.0 })
-            .label("Single Move")
-            .titlebar(true)
-            .movable(false)
-            .ui(&mut ui::root_ui(), |ui| {
-                ui.separator();
-                if ui.button(None, "P1") {
-                    engine.set_side(1.0);
-                    engine.new_search(MAX_AUTO_TIME, Mode::Single, &mut drawable_board);
-
-                }
-                ui.separator();
-                if ui.button(None, "P2") {
-                    engine.set_side(-1.0);
-                    engine.new_search(MAX_SINGLE_TIME, Mode::Single, &mut drawable_board);
+                match p1_maxply_option {
+                    0 => { p1_maxply = None },
+                    1 => { p1_maxply = Some("1".to_string()) },
+                    2 => { p1_maxply = Some("3".to_string()) },
+                    3 => { p1_maxply = Some("5".to_string()) },
+                    4 => { p1_maxply = Some("7".to_string()) },
+                    _ => { p1_maxply = None },
 
                 }
 
-            });
+                if ui.button(None, "Update") {
+                    let mut p1_maxtime_parsed: f32 = p1_maxtime.parse::<f32>().unwrap_or(MAX_TIME);
+                    if p1_maxtime_parsed > MAX_TIME {
+                        p1_maxtime_parsed = MAX_TIME;
 
-        // Update and render board
-        if drawable_board.update() && engine.mode == Mode::Analysis{ 
-            engine.new_search(MAX_TIME, Mode::Analysis, &mut drawable_board);
+                    }
+                    engine.p1_settings.max_time = p1_maxtime_parsed;
 
-        };
-        drawable_board.render();
-
-        // Update Engine
-        engine.update(&mut drawable_board);
-
-        // Render best move
-        match engine.mode {
-            Mode::Analysis | Mode::Single => {
-                if engine.best_search.best_move.is_some() {
-                    drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
-
-                }
-
-            },
-            ugi_engine::Mode::Auto => {
-                if engine.best_search.best_move.is_some() {
-                    if engine.side == 1.0 {
-                        drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
+                    if p1_maxply.is_some() {
+                        engine.p1_settings.max_ply = p1_maxply.clone().unwrap().parse::<f32>().unwrap();
 
                     } else {
-                        drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P2_MOVE);
+                        engine.p1_settings.max_ply = MAX_PLY;
+
+                    }
+
+                    if engine.searching || engine.mode != Mode::Disabled {
+                        engine.new_search(Mode::Analysis, &mut drawable_board);
 
                     }
 
                 }
 
-            },
-            _ => {}
+            });
+
+        widgets::Window::new(hash!(), Vec2 { x: 1250.0, y: 400.0 }, Vec2 { x: 300.0, y: 125.0 })
+            .label("P2 Engine Settings")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                ui.input_text(hash!(), "Max Time (seconds)", &mut p2_maxtime);
+                ui.separator();
+                ui.combo_box(hash!(), "Max Ply", vec!["None", "1", "3", "5", "7"].as_slice(), &mut p2_maxply_option);
+                ui.separator();
+
+                match p2_maxply_option {
+                    0 => { p2_maxply = None },
+                    1 => { p2_maxply = Some("1".to_string()) },
+                    2 => { p2_maxply = Some("3".to_string()) },
+                    3 => { p2_maxply = Some("5".to_string()) },
+                    4 => { p2_maxply = Some("7".to_string()) },
+                    _ => { p2_maxply = None },
+
+                }
+
+                if ui.button(None, "Update") {
+                    let mut p2_maxtime_parsed: f32 = p2_maxtime.parse::<f32>().unwrap_or(MAX_TIME);
+                    if p2_maxtime_parsed > MAX_TIME {
+                        p2_maxtime_parsed = MAX_TIME;
+
+                    }
+                    engine.p2_settings.max_time = p2_maxtime_parsed;
+
+                    if p2_maxply.is_some() {
+                        engine.p2_settings.max_ply = p2_maxply.clone().unwrap().parse::<f32>().unwrap();
+
+                    } else {
+                        engine.p2_settings.max_ply = MAX_PLY;
+
+                    }
+                    
+                    if engine.searching || engine.mode != Mode::Disabled {
+                        engine.new_search(Mode::Analysis, &mut drawable_board);
+
+                    }
+                    
+                }
+
+            });
+
+        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 725.0 }, Vec2 { x: 250.0, y: 75.0 })
+            .label("Auto Play")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                if ui.button(None, "Start") && !drawable_board.game_over() {
+                    engine.new_search(Mode::Auto, &mut drawable_board);
+
+                }
+                ui.separator();
+
+            });
+
+        widgets::Window::new(hash!(), Vec2 { x: 1250.0, y: 725.0 }, Vec2 { x: 250.0, y: 100.0 })
+            .label("Single Move")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                ui.separator();
+                if ui.button(None, "P1 Move") && !drawable_board.game_over() {
+                    engine.set_side(1.0);
+                    engine.new_search(Mode::Single, &mut drawable_board);
+
+                }
+                ui.separator();
+                if ui.button(None, "P2 Move") && !drawable_board.game_over() {
+                    engine.set_side(-1.0);
+                    engine.new_search(Mode::Single, &mut drawable_board);
+
+                }
+
+            });
+
+
+        // UI seperator lines
+        draw_line(950.0, 200.0, 1550.0, 200.0, 1.0, BLACK);
+        draw_line(950.0, 675.0, 1550.0, 675.0, 1.0, BLACK);
+
+        // Update and render board
+        if drawable_board.update() && !drawable_board.game_over() && (engine.mode == Mode::Analysis || engine.mode == Mode::Single) { 
+            engine.new_search(Mode::Analysis, &mut drawable_board);
+
+        };
+        drawable_board.render(&engine);
+
+        // Update Engine
+        engine.update(&mut drawable_board);
+
+        // Render best move
+        if engine.best_search.best_move.is_some() && !drawable_board.game_over() {
+            drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
 
         }
 

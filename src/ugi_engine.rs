@@ -6,9 +6,8 @@ use std::collections::VecDeque;
 
 use crate::{DrawableBoard, Move};
 
-pub const MAX_TIME: usize =  3600; // seconds
-pub const MAX_AUTO_TIME: usize = 3; // seconds
-pub const MAX_SINGLE_TIME: usize = 10; // seconds
+pub const MAX_PLY: f32 = 99.0; // moves
+pub const MAX_TIME: f32 =  3600.0; // seconds
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -26,6 +25,9 @@ pub struct UgiEngine {
     pub side: f64,
 
     pub best_search: SearchInfo,
+
+    pub p1_settings: SearchSettings,
+    pub p2_settings: SearchSettings,
 
     input_sender: Sender<String>,
     ouput_reciver: Receiver<String>,
@@ -74,6 +76,17 @@ impl UgiEngine {
             side: 1.0,
 
             best_search: SearchInfo::new(),
+
+            p1_settings: SearchSettings {
+                max_ply: MAX_PLY as f32,
+                max_time: MAX_TIME as f32,
+
+            },
+            p2_settings: SearchSettings {
+                max_ply: MAX_PLY as f32,
+                max_time: MAX_TIME as f32,
+
+            },
 
             input_sender,
             ouput_reciver,
@@ -151,7 +164,7 @@ impl UgiEngine {
 
     }
 
-    pub fn new_search(&mut self, max_time: usize, search_purpose: Mode, drawable_board: &DrawableBoard) {
+    pub fn new_search(&mut self, search_purpose: Mode, drawable_board: &DrawableBoard) {
         if self.searching {
             self.send("stop");
             self.wait_for_search();
@@ -164,11 +177,22 @@ impl UgiEngine {
         };
         self.send(setcmd.as_str());
 
-        let maxtime_cmd = format!("setoption max_time {}",max_time);
-        self.send(maxtime_cmd.as_str());
-    
-        self.send("go");
+        let maxtime_cmd = match self.side {
+            1.0 => { format!("setoption max_time {}", self.p1_settings.max_time) },
+            _ => { format!("setoption max_time {}", self.p2_settings.max_time) },
 
+        };
+        self.send(maxtime_cmd.as_str());
+
+        let maxply_cmd = match self.side {
+            1.0 => { format!("setoption max_ply {}", self.p1_settings.max_ply) },
+            _ => { format!("setoption max_ply {}", self.p2_settings.max_ply) },
+
+        };
+        self.send(maxply_cmd.as_str());
+
+        self.send("go");
+    
         self.mode = search_purpose;
         self.searching = true;
     
@@ -193,15 +217,16 @@ impl UgiEngine {
     }
     
     pub fn update(&mut self, drawable_board: &mut DrawableBoard) {
-        match self.mode {
-            Mode::Disabled => { // Reset best_search if disabled
-                self.best_search = SearchInfo::new();
-            },
-            _ => {}
+        if self.mode == Mode::Disabled {
+            self.best_search = SearchInfo::new();
 
         }
+        if drawable_board.game_over() && (self.searching || self.mode != Mode::Disabled) {
+            self.stop();
+            return;
 
-
+        }
+        
         let recived: Option<String> = self.recive();
         if let Some(data) = recived {
             let cmds = data.split_whitespace().collect::<Vec<&str>>();
@@ -227,7 +252,8 @@ impl UgiEngine {
     
                             } else {
                                 self.flip_side();
-                                self.new_search(MAX_AUTO_TIME, Mode::Auto, drawable_board);
+                                self.new_search(Mode::Auto, drawable_board);
+                                std::thread::sleep(std::time::Duration::from_millis(500)); // Min delay between moves - freezes app temporarily
 
                             }
                                 
@@ -455,7 +481,6 @@ impl UgiWriter {
 
 
 pub struct SearchSettings {
-    pub engine_side: f32,
     pub max_ply: f32,
     pub max_time: f32,
 
