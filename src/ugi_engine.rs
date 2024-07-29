@@ -26,8 +26,7 @@ pub struct UgiEngine {
 
     pub best_search: SearchInfo,
 
-    pub p1_settings: SearchSettings,
-    pub p2_settings: SearchSettings,
+    pub settings: SearchSettings,
 
     input_sender: Sender<String>,
     ouput_reciver: Receiver<String>,
@@ -77,12 +76,7 @@ impl UgiEngine {
 
             best_search: SearchInfo::new(),
 
-            p1_settings: SearchSettings {
-                max_ply: MAX_PLY as f32,
-                max_time: MAX_TIME as f32,
-
-            },
-            p2_settings: SearchSettings {
+            settings: SearchSettings {
                 max_ply: MAX_PLY as f32,
                 max_time: MAX_TIME as f32,
 
@@ -177,18 +171,16 @@ impl UgiEngine {
         };
         self.send(setcmd.as_str());
 
-        let maxtime_cmd = match self.side {
-            1.0 => { format!("setoption max_time {}", self.p1_settings.max_time) },
-            _ => { format!("setoption max_time {}", self.p2_settings.max_time) },
+        if search_purpose == Mode::Analysis {
+            self.settings.max_ply = MAX_PLY;
+            self.settings.max_time = MAX_TIME;
 
-        };
+        }
+        
+        let maxtime_cmd = format!("setoption max_time {}", self.settings.max_time);
         self.send(maxtime_cmd.as_str());
 
-        let maxply_cmd = match self.side {
-            1.0 => { format!("setoption max_ply {}", self.p1_settings.max_ply) },
-            _ => { format!("setoption max_ply {}", self.p2_settings.max_ply) },
-
-        };
+        let maxply_cmd = format!("setoption max_ply {}", self.settings.max_ply);
         self.send(maxply_cmd.as_str());
 
         self.send("go");
@@ -253,7 +245,7 @@ impl UgiEngine {
                             } else {
                                 self.flip_side();
                                 self.new_search(Mode::Auto, drawable_board);
-                                std::thread::sleep(std::time::Duration::from_millis(500)); // Min delay between moves - freezes app temporarily
+                                std::thread::sleep(std::time::Duration::from_millis(100)); // Min delay between moves 
 
                             }
                                 
