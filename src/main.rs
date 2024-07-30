@@ -1,6 +1,8 @@
 mod ugi_engine;
 
-use macroquad::prelude::*;
+use core::hash;
+
+use macroquad::{prelude::*, shapes};
 use macroquad::ui::{self, widgets, hash};
 
 use ugi_engine::{Mode, UgiEngine, MAX_PLY, MAX_TIME};
@@ -99,12 +101,19 @@ pub enum Action {
 
 }
 
-
 pub struct DrawableBoard {
     boardstate: BoardState,
     prev_boardstate: Option<BoardState>,
+    prev_move: Option<Move>,
+
+    history: Vec<(BoardState, Move)>,
+    history_idx: usize,
 
     pieces: Vec<Piece>,
+
+    pickup_pos: Option<usize>,
+    exchange_pos: Option<usize>,
+    drop_pos: Option<usize>,
 
     pos: (f32, f32),
     board_pos: (f32, f32),
@@ -122,8 +131,16 @@ impl DrawableBoard {
         let mut d_board = DrawableBoard {
             boardstate,
             prev_boardstate: Some(boardstate),
+            prev_move: None,
+
+            history: vec![(boardstate.clone(), vec![])],
+            history_idx: 0,
 
             pieces: vec![],
+
+            pickup_pos: None,
+            exchange_pos: None,
+            drop_pos: None,
 
             pos: (x, y),
             board_pos,
@@ -292,9 +309,16 @@ impl DrawableBoard {
                 if self.prev_boardstate != Some(self.boardstate) {
                     self.prev_boardstate = Some(self.boardstate.clone());
 
+                    if self.history_idx == (self.history.len() - 1) {
+                        self.history.push((self.boardstate.clone(), self.prev_move.clone().unwrap_or(vec![])));
+                        self.history_idx += 1;
+
+                    }
+
                     state_change = true;
                    
                 }
+
                 for piece in self.pieces.iter() {
                     if piece.is_touching_point(mouse_pos.0, mouse_pos.1) && is_mouse_button_pressed(MouseButton::Left) {
                         self.action = Action::Dragging(piece.id);
@@ -309,6 +333,8 @@ impl DrawableBoard {
 
             },
             Action::Dragging(id) => {
+                self.pickup_pos = Some(id);
+
                 if is_mouse_button_released(MouseButton::Left) {
                     if let (Some(snap_pos), replace) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, false) {
                         if replace {
@@ -320,7 +346,11 @@ impl DrawableBoard {
                         } else {
                             self.action = Action::None;
 
+                            self.prev_move = Some(vec![self.pickup_pos.unwrap(), snap_pos]);
+
                         }
+
+                        self.exchange_pos = Some(snap_pos);
 
                         self.snap_piece(id, snap_pos);
 
@@ -340,6 +370,8 @@ impl DrawableBoard {
                 if is_mouse_button_pressed(MouseButton::Left) {
                     if let (Some(snap_pos), _) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, true) {
                         self.snap_piece(id, snap_pos);
+
+                        self.prev_move = Some(vec![self.pickup_pos.unwrap(), self.exchange_pos.unwrap(), snap_pos]);
 
                     }
 
@@ -430,7 +462,16 @@ impl DrawableBoard {
 
     }
 
-    pub fn render_move(&mut self, mv: Move, color: Color) {
+    pub fn render_move(&mut self, mut mv: Move, reverse: bool, color: Color) {
+        if mv == vec![] {
+            return;
+
+        }
+
+        if reverse {
+            mv.reverse();
+        }
+
         for i in 0..mv.len() -1 {
             self.render_arrow(mv[i], mv[i+1], color);
 
@@ -469,8 +510,10 @@ impl DrawableBoard {
 
         let new = DrawableBoard::new(self.pos.0, self.pos.1, new_state);
         
+        self.prev_boardstate = Some(self.boardstate.clone());
         self.boardstate = new.boardstate;
-        self.prev_boardstate = None;
+
+        self.prev_move = Some(mv.clone());
 
         self.pieces = new.pieces;
 
@@ -481,11 +524,45 @@ impl DrawableBoard {
 
     }
 
+    pub fn load_history(&mut self, i: usize) {
+        if i <= self.history.len() - 1 {
+            self.history_idx = i;
+
+            let history = self.history[i].clone();
+            let new: DrawableBoard = DrawableBoard::new(self.pos.0, self.pos.1, history.0);
+            
+            self.boardstate = new.boardstate;
+            self.prev_boardstate = Some(new.boardstate);
+            self.prev_move = Some(history.1);
+
+            self.pieces = new.pieces;
+
+            self.pos = new.pos;
+            self.board_pos = new.board_pos;
+
+            self.action = new.action;
+
+        }
+
+    }
+
+    pub fn render_history_mv(&mut self, reverse: bool, i: usize) {
+        if i <= self.history.len() - 1 {
+            let mv = self.history[i].1.clone();
+            self.render_move(mv, reverse, RED);
+
+        }
+
+    }
+
     pub fn reset(&mut self) {
         let new = DrawableBoard::new(self.pos.0, self.pos.1, STARTING_BOARD);
         
         self.boardstate = new.boardstate;
-        self.prev_boardstate = None;
+        self.prev_boardstate = Some(new.boardstate);
+
+        self.history = vec![(self.boardstate.clone(), vec![])];
+        self.history_idx = 0;
 
         self.pieces = new.pieces;
 
@@ -534,9 +611,9 @@ impl DrawableBoard {
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "gyges ui".to_owned(),
+        window_title: "Gyges UI".to_owned(),
         window_height: 900,
-        window_width: 1250,
+        window_width: 1350,
         window_resizable: false,
         ..Default::default() 
     }
@@ -576,6 +653,7 @@ async fn main() {
                 ui.separator();
                 if ui.button(None, "Reset") {
                     drawable_board.reset();
+                    
 
                 }
                 ui.separator();
@@ -705,7 +783,7 @@ async fn main() {
 
                 }
                 ui.separator();
-                if ui.button(None, "Stop") && !drawable_board.game_over() {
+                if ui.button(None, "Stop") && !drawable_board.game_over() && (engine.mode == Mode::Auto || engine.mode == Mode::Single) {
                     engine.stop();
 
                 }
@@ -721,6 +799,39 @@ async fn main() {
 
             });
 
+        widgets::Window::new(hash!(), Vec2 { x: 1225.0, y: 50.0 }, Vec2 { x: 75.0, y: 800.0 })
+            .label("HISTORY")
+            .titlebar(true)
+            .movable(false)
+            .ui(&mut ui::root_ui(), |ui| {
+                for i in 0..drawable_board.history.len() {
+                    // Highlight current history index
+                    if i == drawable_board.history_idx {
+                        widgets::Group::new(hash!(),Vec2 { x: 73.0, y: 22.0 })
+                            .draggable(false)
+                            .highlight(true)
+                            .hoverable(false)
+                            .position(Vec2 { x: 0.0, y: i as f32 * 22.0 })
+                            .ui(ui, |_| {});
+
+                    }
+
+                    ui.separator();
+                    let button = widgets::Button::new(format!("Move {}", i).as_str())
+                        .position( Vec2 { x: 0.0, y: i as f32 * 22.0 })
+                        .ui(ui);
+
+                    if button {
+                        drawable_board.load_history(i);
+
+                    }
+
+                }
+
+            });
+
+        
+
         // Update and render board
         if drawable_board.update() && !drawable_board.game_over() && (engine.mode == Mode::Analysis || engine.mode == Mode::Single) { 
             engine.new_search(Mode::Analysis, &mut drawable_board);
@@ -733,8 +844,29 @@ async fn main() {
 
         // Render best move
         if engine.best_search.best_move.is_some() && !drawable_board.game_over() {
-            drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), P1_MOVE);
+            drawable_board.render_move(engine.best_search.best_move.clone().unwrap(), false, P1_MOVE);
 
+        }
+
+        // Board history keysbinds
+        // Need to clean up small bug where the boardstate is not updated when undoing/redoing
+        // Need to fix edge cases for different search modes
+
+        if is_key_down(KeyCode::Left) { // Undo
+            drawable_board.render_history_mv(true, drawable_board.history_idx)
+
+        } else if is_key_down(KeyCode::Right) { // Redo
+            drawable_board.render_history_mv(false, drawable_board.history_idx + 1)
+
+        }
+            
+        if is_key_released(KeyCode::Left) { // Undo
+            drawable_board.load_history(drawable_board.history_idx - 1);
+
+
+        } else if is_key_released(KeyCode::Right) { // Redo
+            drawable_board.load_history(drawable_board.history_idx + 1);
+            
         }
 
         next_frame().await;
