@@ -1,8 +1,6 @@
 mod ugi_engine;
 
-use core::hash;
-
-use macroquad::{prelude::*, shapes};
+use macroquad::prelude::*;
 use macroquad::ui::{self, widgets, hash};
 
 use ugi_engine::{Mode, UgiEngine, MAX_PLY, MAX_TIME};
@@ -113,7 +111,6 @@ pub struct DrawableBoard {
 
     pickup_pos: Option<usize>,
     exchange_pos: Option<usize>,
-    drop_pos: Option<usize>,
 
     pos: (f32, f32),
     board_pos: (f32, f32),
@@ -140,7 +137,6 @@ impl DrawableBoard {
 
             pickup_pos: None,
             exchange_pos: None,
-            drop_pos: None,
 
             pos: (x, y),
             board_pos,
@@ -333,7 +329,7 @@ impl DrawableBoard {
 
             },
             Action::Dragging(id) => {
-                self.pickup_pos = Some(id);
+                self.pickup_pos = Some(self.get_piece(id).unwrap().i);
 
                 if is_mouse_button_released(MouseButton::Left) {
                     if let (Some(snap_pos), replace) = self.get_nearest_snap_pos(mouse_pos.0, mouse_pos.1, false) {
@@ -420,10 +416,7 @@ impl DrawableBoard {
             piece.draw();
 
         }
-
-        // Box around whole board
-        draw_rectangle_lines(self.pos.0, self.pos.1, BOARD_WIDTH, BOARD_HEIGHT, 2.0, BLACK);
-
+        
         // Draw a box around where the piece will be placed
         if self.action != Action::None {
             let mouse_pos = mouse_position();
@@ -613,7 +606,7 @@ fn window_conf() -> Conf {
     Conf {
         window_title: "Gyges UI".to_owned(),
         window_height: 900,
-        window_width: 1350,
+        window_width: 1300,
         window_resizable: false,
         ..Default::default() 
     }
@@ -645,13 +638,15 @@ async fn main() {
         }
 
         // Draw UI
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 50.0 }, Vec2 { x: 250.0, y: 100.0 })
+        widgets::Window::new(1, vec2(925.0, 50.0), vec2(250.0, 100.0))
             .label("BOARD CONTROLS")
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
+                ui.clear_input_focus();
+
                 ui.separator();
-                if ui.button(None, "Reset") {
+                if ui.button(None, "New Game") {
                     drawable_board.reset();
                     
 
@@ -664,9 +659,8 @@ async fn main() {
 
             });
         
-        
 
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 175.0}, Vec2 { x: 250.0, y: 125.0 })
+        widgets::Window::new(2, vec2(925.0, 175.0), vec2(250.0, 125.0))
             .label("ANALYSIS")
             .titlebar(true)
             .movable(false)
@@ -695,7 +689,7 @@ async fn main() {
                 
             });
             
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 325.0 }, Vec2 { x: 250.0, y: 225.0 })
+        widgets::Window::new(3, vec2(925.0, 325.0), vec2(250.0, 225.0))
             .label("ANALYSIS INFO")
             .titlebar(true)
             .movable(false)
@@ -735,7 +729,7 @@ async fn main() {
                 
             });
 
-        widgets::Window::new(hash!(), Vec2 { x: 950.0, y: 575.0 }, Vec2 { x: 250.0, y: 275.0 })
+        widgets::Window::new(4, vec2(925.0, 575.0), vec2(250.0, 275.0))
             .label("AUTO PLAY")
             .titlebar(true)
             .movable(false)
@@ -799,30 +793,30 @@ async fn main() {
 
             });
 
-        widgets::Window::new(hash!(), Vec2 { x: 1225.0, y: 50.0 }, Vec2 { x: 75.0, y: 800.0 })
+        widgets::Window::new(5, vec2(1200.0, 50.0), vec2(75.0, 800.0))
             .label("HISTORY")
-            .titlebar(true)
             .movable(false)
+            .titlebar(true)
             .ui(&mut ui::root_ui(), |ui| {
                 for i in 0..drawable_board.history.len() {
                     // Highlight current history index
                     if i == drawable_board.history_idx {
-                        widgets::Group::new(hash!(),Vec2 { x: 73.0, y: 22.0 })
+                        widgets::Group::new(hash!(),vec2(73.0, 22.0))
                             .draggable(false)
                             .highlight(true)
-                            .hoverable(false)
-                            .position(Vec2 { x: 0.0, y: i as f32 * 22.0 })
+                            .position(vec2(0.0, i as f32 * 22.0))
                             .ui(ui, |_| {});
 
                     }
 
                     ui.separator();
-                    let button = widgets::Button::new(format!("Move {}", i).as_str())
-                        .position( Vec2 { x: 0.0, y: i as f32 * 22.0 })
-                        .ui(ui);
-
-                    if button {
+                    if ui.button(vec2(0.0, i as f32 * 22.0), format!("Move {}", i).as_str()) {
                         drawable_board.load_history(i);
+
+                        if engine.mode != Mode::Disabled {
+                            engine.new_search(Mode::Analysis, &mut drawable_board);
+
+                        }
 
                     }
 
@@ -830,14 +824,15 @@ async fn main() {
 
             });
 
-        
-
         // Update and render board
         if drawable_board.update() && !drawable_board.game_over() && (engine.mode == Mode::Analysis || engine.mode == Mode::Single) { 
             engine.new_search(Mode::Analysis, &mut drawable_board);
 
         };
         drawable_board.render(&engine);
+
+        // Draw Box around window 
+        draw_rectangle_lines(0.0, 0.0, 1300.0, 900.0, 2.0, BLACK);
 
         // Update Engine
         engine.update(&mut drawable_board);
@@ -848,14 +843,11 @@ async fn main() {
 
         }
 
-        // Board history keysbinds
-        // Need to clean up small bug where the boardstate is not updated when undoing/redoing
-        // Need to fix edge cases for different search modes
-
-        if is_key_down(KeyCode::Left) { // Undo
+        // Handle History Keybinds
+        if is_key_down(KeyCode::Left) { // Show undo
             drawable_board.render_history_mv(true, drawable_board.history_idx)
 
-        } else if is_key_down(KeyCode::Right) { // Redo
+        } else if is_key_down(KeyCode::Right) { // Show redo
             drawable_board.render_history_mv(false, drawable_board.history_idx + 1)
 
         }
@@ -863,11 +855,24 @@ async fn main() {
         if is_key_released(KeyCode::Left) { // Undo
             drawable_board.load_history(drawable_board.history_idx - 1);
 
+            if engine.mode != Mode::Disabled {
+                engine.new_search(Mode::Analysis, &mut drawable_board);
+
+            }
 
         } else if is_key_released(KeyCode::Right) { // Redo
             drawable_board.load_history(drawable_board.history_idx + 1);
+
+            if engine.mode != Mode::Disabled {
+                engine.new_search(Mode::Analysis, &mut drawable_board);
+
+            }
             
+        } else if is_key_released(KeyCode::Up) { // Jump to current board
+            drawable_board.load_history(drawable_board.history.len() - 1);
+
         }
+
 
         next_frame().await;
 
