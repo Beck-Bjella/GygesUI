@@ -95,7 +95,8 @@ impl Piece {
 
 
 // Action Enum for `DrawableBoard`
-#[derive(Debug, PartialEq)]
+// Used to determine what action the user is currently doing
+#[derive(Debug, PartialEq, Clone)]
 pub enum Action {
     None,
     Dragging(usize),
