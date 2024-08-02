@@ -470,8 +470,6 @@ impl UgiWriter {
     
 }
 
-
-
 pub struct SearchSettings {
     pub max_ply: f32,
     pub max_time: f32,

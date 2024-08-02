@@ -35,6 +35,7 @@ pub type Move = Vec<usize>;
 pub type BoardState = [usize; 38];
 
 
+// The pieces that are rendered on the `DrawableBoard`
 #[derive(Clone)]
 pub struct Piece {
     pub id: usize,
@@ -56,6 +57,7 @@ impl Piece {
 
     }
 
+    // Checks if a point is touching the piece
     pub fn is_touching_point(&self, point_x: f32, point_y: f32) -> bool {
         let dx = self.pos.0 - point_x;
         let dy = self.pos.1 - point_y;
@@ -65,6 +67,7 @@ impl Piece {
 
     }
 
+    // Draw the piece
     pub fn draw(&self) {
         if self.piece_type == 3 {
             draw_poly(self.pos.0, self.pos.1, 100, PIECE_RADIUS, 0., BLACK);
@@ -91,6 +94,7 @@ impl Piece {
 }
 
 
+// Action Enum for `DrawableBoard`
 #[derive(Debug, PartialEq)]
 pub enum Action {
     None,
@@ -98,6 +102,10 @@ pub enum Action {
     Dropping(usize),
 
 }
+
+// Drawable Board Struct 
+// The board that is rendered on the screen and all of its logic
+#[derive(Clone)]
 
 pub struct DrawableBoard {
     boardstate: BoardState,
@@ -162,6 +170,8 @@ impl DrawableBoard {
 
     }
 
+    // ========= Helper Functions =========
+
     pub fn boardstate_str(&self) -> String {
         let mut boardstate_str = String::new();
         for i in 0..38 {
@@ -213,6 +223,7 @@ impl DrawableBoard {
         None
 
     }
+
 
     fn get_piece_at(&self, i: usize) -> Option<&Piece> {
         for piece in self.pieces.iter() {
@@ -269,7 +280,10 @@ impl DrawableBoard {
         return (x, y);
 
     }
+    
+    // ========= Helper Functions =========
 
+    // Snaps a piece to a position
     fn snap_piece(&mut self, id: usize, snap_pos: usize) {
         let pos_xy = self.get_pos(snap_pos);
                         
@@ -286,6 +300,7 @@ impl DrawableBoard {
 
     }
 
+    // Handles moving a piece
     fn moving(&mut self, id: usize) {
         let mouse_pos = mouse_position();
         if let Some(piece) = self.get_mut_piece(id) {
@@ -295,7 +310,8 @@ impl DrawableBoard {
 
     }
     
-    /// Returns true if the boardstate changed this frame
+    // Main update function
+    // Returns true if the boardstate changed this frame
     pub fn update(&mut self) -> bool {
         let mouse_pos = mouse_position();
 
@@ -386,6 +402,7 @@ impl DrawableBoard {
 
     }
 
+    // Main render function
     pub fn render(&self, engine: &UgiEngine) {
         // Board
         draw_poly(self.pos.0 + 450.0, self.pos.1 + 450.0, 4, 450.0, 0.0, COLOR_BOARD);
@@ -455,6 +472,7 @@ impl DrawableBoard {
 
     }
 
+    // Render a move on the board
     pub fn render_move(&mut self, mut mv: Move, reverse: bool, color: Color) {
         if mv == vec![] {
             return;
@@ -472,6 +490,7 @@ impl DrawableBoard {
 
     }
 
+    // Render an arrow on the board
     fn render_arrow(&mut self, boardpos_1: usize, boardpos_2: usize, color: Color) {
         let xy_pos_1 = self.get_pos(boardpos_1);
         let xy_pos_2 = self.get_pos(boardpos_2);
@@ -481,6 +500,7 @@ impl DrawableBoard {
 
     }
 
+    // Make a move on the board
     pub fn make_move(&mut self, mv: Move) {
         let mut new_state = self.boardstate.clone();
         if mv.len() == 0 {
@@ -517,6 +537,7 @@ impl DrawableBoard {
 
     }
 
+    // Load a specific move in the history
     pub fn load_history(&mut self, i: usize) {
         if i <= self.history.len() - 1 {
             self.history_idx = i;
@@ -539,6 +560,7 @@ impl DrawableBoard {
 
     }
 
+    // Renders a specific move in the history
     pub fn render_history_mv(&mut self, reverse: bool, i: usize) {
         if i <= self.history.len() - 1 {
             let mv = self.history[i].1.clone();
@@ -548,6 +570,7 @@ impl DrawableBoard {
 
     }
 
+    // Reset the board
     pub fn reset(&mut self) {
         let new = DrawableBoard::new(self.pos.0, self.pos.1, STARTING_BOARD);
         
@@ -566,6 +589,7 @@ impl DrawableBoard {
 
     }
 
+    // Flip the board
     pub fn flip(&mut self) {
         let mut flipped_boardstate = [0; 38];
 
@@ -595,12 +619,14 @@ impl DrawableBoard {
 
     }
 
+    // Checks for game over conditions
     pub fn game_over(&self) -> bool {
         return self.boardstate[36] != 0 || self.boardstate[37] != 0;
 
     }
 
 }
+
 
 fn window_conf() -> Conf {
     Conf {
@@ -619,7 +645,7 @@ async fn main() {
 
     let mut drawable_board = DrawableBoard::new(0.0, 0.0, STARTING_BOARD);
 
-    let mut engine = UgiEngine::new("C:/Users/beckb/Documents/GitHub/GygesRust/target/release/gyges_engine.exe");
+    let mut engine = UgiEngine::new("./gyges_engine.exe");
     engine.send("ugi");
     engine.new_search(Mode::Analysis, &mut drawable_board);
 
@@ -628,6 +654,7 @@ async fn main() {
     let mut p1_maxply_option: usize = 0;
     let mut p1_maxply: Option<String> = None;
 
+    // Main Loop
     loop {
         clear_background(LIGHTGRAY);
 
@@ -658,8 +685,7 @@ async fn main() {
                 }
 
             });
-        
-
+            
         widgets::Window::new(2, vec2(925.0, 175.0), vec2(250.0, 125.0))
             .label("ANALYSIS")
             .titlebar(true)
@@ -687,8 +713,8 @@ async fn main() {
                     
                 }
                 
-            });
-            
+            }); 
+
         widgets::Window::new(3, vec2(925.0, 325.0), vec2(250.0, 225.0))
             .label("ANALYSIS INFO")
             .titlebar(true)
@@ -728,7 +754,7 @@ async fn main() {
                 }
                 
             });
-
+            
         widgets::Window::new(4, vec2(925.0, 575.0), vec2(250.0, 275.0))
             .label("AUTO PLAY")
             .titlebar(true)
@@ -788,7 +814,7 @@ async fn main() {
                 ui.separator();
                 ui.input_text(hash!(), "Max Time (s)", &mut p1_maxtime);
                 ui.separator();
-                ui.combo_box(hash!(), "Max Ply", vec!["None", "1", "3", "5", "7"].as_slice(), &mut p1_maxply_option);
+                ui.combo_box(hash!(), "Max Ply", vec!["No Limit", "1", "3", "5", "7"].as_slice(), &mut p1_maxply_option);
                 ui.separator();
 
             });
