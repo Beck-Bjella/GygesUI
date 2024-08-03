@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod ugi_engine;
 
 use macroquad::prelude::*;
@@ -650,10 +652,10 @@ async fn main() {
     engine.send("ugi");
     engine.new_search(Mode::Analysis, &mut drawable_board);
 
-    let mut p1_maxtime: String = MAX_TIME.to_string();
+    let mut maxtime: String = MAX_TIME.to_string();
 
-    let mut p1_maxply_option: usize = 0;
-    let mut p1_maxply: Option<String> = None;
+    let mut maxply_option: usize = 0;
+    let mut maxply: Option<String> = None;
 
     // Main Loop
     loop {
@@ -671,13 +673,15 @@ async fn main() {
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
-                ui.clear_input_focus();
-
                 ui.separator();
                 if ui.button(None, "New Game") {
                     drawable_board.reset();
-                    
 
+                    if engine.mode != Mode::Disabled {
+                        engine.new_search(Mode::Analysis, &mut drawable_board);
+
+                    }
+                    
                 }
                 ui.separator();
                 if ui.button(None, "Flip Board") {
@@ -761,25 +765,25 @@ async fn main() {
             .titlebar(true)
             .movable(false)
             .ui(&mut ui::root_ui(), |ui| {
-                match p1_maxply_option {
-                    0 => { p1_maxply = None },
-                    1 => { p1_maxply = Some("1".to_string()) },
-                    2 => { p1_maxply = Some("3".to_string()) },
-                    3 => { p1_maxply = Some("5".to_string()) },
-                    4 => { p1_maxply = Some("7".to_string()) },
-                    _ => { p1_maxply = None },
+                match maxply_option {
+                    0 => { maxply = None },
+                    1 => { maxply = Some("1".to_string()) },
+                    2 => { maxply = Some("3".to_string()) },
+                    3 => { maxply = Some("5".to_string()) },
+                    4 => { maxply = Some("7".to_string()) },
+                    _ => { maxply = None },
 
                 }
 
-                let mut p1_maxtime_parsed: f32 = p1_maxtime.parse::<f32>().unwrap_or(MAX_TIME);
-                if p1_maxtime_parsed > MAX_TIME {
-                    p1_maxtime_parsed = MAX_TIME;
+                let mut maxtime_parsed: f32 = maxtime.parse::<f32>().unwrap_or(0.0);
+                if maxtime_parsed > MAX_TIME {
+                    maxtime_parsed = MAX_TIME;
 
                 }
-                engine.settings.max_time = p1_maxtime_parsed;
+                engine.settings.max_time = maxtime_parsed;
 
-                if p1_maxply.is_some() {
-                    engine.settings.max_ply = p1_maxply.clone().unwrap().parse::<f32>().unwrap();
+                if maxply.is_some() {
+                    engine.settings.max_ply = maxply.clone().unwrap().parse::<f32>().unwrap();
 
                 } else {
                     engine.settings.max_ply = MAX_PLY;
@@ -813,9 +817,9 @@ async fn main() {
                 ui.separator();
                 ui.label(None, "  ---------- SETTINGS ----------");
                 ui.separator();
-                ui.input_text(hash!(), "Max Time (s)", &mut p1_maxtime);
+                ui.input_text(hash!(), "Max Time (s)", &mut maxtime);
                 ui.separator();
-                ui.combo_box(hash!(), "Max Ply", vec!["No Limit", "1", "3", "5", "7"].as_slice(), &mut p1_maxply_option);
+                ui.combo_box(hash!(), "Max Ply", vec!["No Limit", "1", "3", "5", "7"].as_slice(), &mut maxply_option);
                 ui.separator();
 
             });

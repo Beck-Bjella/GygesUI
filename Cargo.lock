@@ -111,6 +111,7 @@ name = "gygesUI"
 version = "1.0.0"
 dependencies = [
  "macroquad",
+ "winapi",
 ]
 
 [[package]]

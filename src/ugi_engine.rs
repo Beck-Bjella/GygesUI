@@ -1,14 +1,20 @@
+use core::panic;
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio, ChildStdout, ChildStdin};
-use std::io::{self, Write, Read};
+use std::io::{self, Read, Write};
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::collections::VecDeque;
 
+use winapi::um::winbase::CREATE_NO_WINDOW;
+
 use crate::{DrawableBoard, Move};
 
+// Constants
 pub const MAX_PLY: f32 = 99.0; // moves
 pub const MAX_TIME: f32 =  3600.0; // seconds
 
+// The mode of the engine
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Disabled,
@@ -18,7 +24,8 @@ pub enum Mode {
 
 }
 
-
+// The UgiEngine struct communicates with a compatible Ugi engine
+// Stores all relevant engine data
 pub struct UgiEngine {
     pub mode: Mode,
     pub searching: bool,
@@ -46,6 +53,7 @@ impl UgiEngine {
         let mut engine_process = Command::new(engine_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .expect("Failed to start the process");
 
@@ -97,16 +105,20 @@ impl UgiEngine {
 
     }
 
+    // ===== Communication functions =====
+
     pub fn send(&mut self, cmd: &str) {
-        self.input_sender.send(cmd.to_string()).expect("Failed to send data to the engine");
-        println!("SENT: {}", cmd);
+        let x = self.input_sender.send(cmd.to_string());
+        if x.is_err() {
+            panic!("Failed to send command: {}", cmd);
+
+        }
 
     }
 
     fn try_recive(&mut self) {
         match self.ouput_reciver.try_recv() {
             Ok(s) => {
-                println!("RECIVED: {}", s.clone());
                 self.recived_queue.push_front(s.clone());
 
             }
@@ -127,7 +139,7 @@ impl UgiEngine {
     
     }
 
-    // ========================
+    // ===== Engine control functions =====
 
     pub fn flip_side(&mut self) {
         self.side *= -1.0;
@@ -147,9 +159,8 @@ impl UgiEngine {
     }
 
     pub fn quit(&mut self) {
-        self.stop();
         self.send("quit");
-
+        
         self.reader_quit_sender.send(true).unwrap();
         self.writer_quit_sender.send(true).unwrap();
 
@@ -177,16 +188,19 @@ impl UgiEngine {
 
         }
         
-        let maxtime_cmd = format!("setoption max_time {}", self.settings.max_time);
+        let maxtime_cmd = format!("setoption maxTime {}", self.settings.max_time);
         self.send(maxtime_cmd.as_str());
 
-        let maxply_cmd = format!("setoption max_ply {}", self.settings.max_ply);
+        let maxply_cmd = format!("setoption maxPly {}", self.settings.max_ply);
         self.send(maxply_cmd.as_str());
 
         self.send("go");
     
         self.mode = search_purpose;
         self.searching = true;
+
+        // Sleep 
+        std::thread::sleep(std::time::Duration::from_millis(100));
     
     }
 
@@ -208,6 +222,7 @@ impl UgiEngine {
 
     }
     
+    // Main update function
     pub fn update(&mut self, drawable_board: &mut DrawableBoard) {
         if self.mode == Mode::Disabled {
             self.best_search = SearchInfo::new();
@@ -267,7 +282,7 @@ impl UgiEngine {
 
     }
 
-    // ========================
+    // ===== Helper functions =====
     
     pub fn parse_bestmove_str(&self, raw_move: &str) -> Move {
         let raw_mv_data: Vec<&str> = raw_move.split("|").collect();
@@ -375,6 +390,8 @@ pub fn flip_move(mv: Move) -> Move {
 
 }
 
+
+// Reader and writer structs handle the communication.
 struct UgiReader {
     data_out: Sender<String>,
     quit_in: Receiver<bool>,
@@ -470,13 +487,17 @@ impl UgiWriter {
     
 }
 
+
+// Stores search settings
+#[derive(Debug, Clone)]
 pub struct SearchSettings {
     pub max_ply: f32,
     pub max_time: f32,
 
 }
 
-#[derive(Debug)]
+// Stores recived search info
+#[derive(Debug, Clone)]
 pub struct SearchInfo {
     pub ply: Option<f64>,
     pub best_move: Option<Move>,
@@ -488,6 +509,7 @@ pub struct SearchInfo {
     pub time: Option<f64>,
 
 }
+
 impl SearchInfo {
     pub fn new() -> SearchInfo {
         return SearchInfo {

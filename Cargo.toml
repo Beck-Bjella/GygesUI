@@ -12,3 +12,4 @@ debug = false
 
 [dependencies]
 macroquad = "0.4.4"
+winapi = "0.3.9"
